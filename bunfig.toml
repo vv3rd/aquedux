@@ -1,0 +1,6 @@
+[install]
+auto = "disable"
+
+[test]
+preload = ['./test/dom-setup.ts', './test/setup.ts']
+

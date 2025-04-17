@@ -1,0 +1,26 @@
+{
+  "$schema": "http://json.schemastore.org/tsconfig",
+  "extends": "@tsconfig/strictest",
+  "compilerOptions": {
+    "target": "ES2020",
+    "module": "ESNext",
+    "lib": ["ES2020", "DOM", "DOM.Iterable"],
+    "useDefineForClassFields": true,
+    "skipLibCheck": true,
+
+    "moduleResolution": "bundler",
+    "allowImportingTsExtensions": true,
+    "resolveJsonModule": true,
+    "isolatedModules": true,
+    "moduleDetection": "force",
+    "noEmit": true,
+    "jsx": "react-jsx",
+
+    "strict": true,
+    "noFallthroughCasesInSwitch": false,
+
+    "noUnusedLocals": false,
+    "noUnusedParameters": false
+  },
+  "include": ["src", "lib", "test"]
+}
