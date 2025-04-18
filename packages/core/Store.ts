@@ -1,7 +1,7 @@
 import { Reducer } from "./Reducer";
 import { Task } from "./Task";
 import { Msg, SomeMsg } from "./Msg";
-import { Pretty } from "./toolkit/ts";
+import { Pretty } from "../tools/ts";
 
 export namespace Store {
     export const create = createStore;

@@ -1,7 +1,7 @@
 import { TaskScheduler } from "./Task";
 import { Msg, MsgWith, SomeMsg } from "./Msg";
-import { isPlainObject } from "./toolkit/objects";
-import { Fn } from "./toolkit/functions";
+import { isPlainObject } from "../tools/objects";
+import { Fn } from "../tools/functions";
 
 export interface Reducer<TState, TMsg = SomeMsg, TCtx = {}> {
     (

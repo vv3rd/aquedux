@@ -1,7 +1,7 @@
 import { Msg, MsgWith } from "./Msg";
 import { StoreInTask } from "./Store";
 import { Task, TaskScheduler } from "./Task";
-import { isPlainObject } from "./toolkit/objects";
+import { isPlainObject } from "../tools/objects";
 
 enum CacheStatus {
     Initial,

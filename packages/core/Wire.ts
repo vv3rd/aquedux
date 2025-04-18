@@ -1,7 +1,7 @@
-import { Msg, SomeMsg } from "./Msg";
-import { Reducer } from "./Reducer";
-import { AnyStore, StoreInTask } from "./Store";
-import { Task, TaskScheduler } from "./Task";
+import { Msg, type SomeMsg } from "./Msg";
+import type { Reducer } from "./Reducer";
+import type { AnyStore, StoreInTask } from "./Store";
+import { Task, type TaskScheduler } from "./Task";
 
 export namespace Wire {}
 
@@ -110,4 +110,4 @@ const stubTaskControls: StoreInTask<any, any> = {
     // nextMessage() { throw new Error(FUCK_TASK_NOT_REAL); },
 };
 
- const FUCK_TASK_NOT_REAL = "Task api on wire probe message is a stub";
+const FUCK_TASK_NOT_REAL = "Task api on wire probe message is a stub";

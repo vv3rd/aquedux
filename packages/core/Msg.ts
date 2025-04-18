@@ -1,5 +1,5 @@
-import { Fn, neutral } from "./toolkit/functions";
-import { Pretty } from "./toolkit/ts";
+import { Fn, neutral } from "../tools/functions";
+import { Pretty } from "../tools/ts";
 
 export interface Msg<T extends Msg.Type = Msg.Type> {
     type: T;

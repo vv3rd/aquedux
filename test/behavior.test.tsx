@@ -1,8 +1,8 @@
 import { test, expect } from "bun:test";
 import { render, screen, act } from "@testing-library/react";
 import { Boundry } from "./help";
-import { Reducer } from "../lib/Reducer";
-import { Store } from "../lib/Store";
+import { Reducer } from "../packages/core/Reducer";
+import { Store } from "../packages/core/Store";
 import React from "react";
 
 const reducer = Reducer.compose({
