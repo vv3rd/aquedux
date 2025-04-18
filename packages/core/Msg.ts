@@ -1,4 +1,4 @@
-import { Fn, neutral } from "../tools/functions";
+import { Fn, same } from "../tools/functions";
 import { Pretty } from "../tools/ts";
 
 export interface Msg<T extends Msg.Type = Msg.Type> {
@@ -68,9 +68,8 @@ export namespace Msg {
 
     export function ofType<T extends string>(type: T) {
         const builders = {
-            withPayload: <P, A extends unknown[] = [payload: P]>(
-                prepare: Fn<A, P> = neutral as any,
-            ) => create(type, (...a: A) => Msg(type, prepare(...a))),
+            withPayload: <P, A extends unknown[] = [payload: P]>(prepare: Fn<A, P> = same as any) =>
+                create(type, (...a: A) => Msg(type, prepare(...a))),
         };
         return Object.assign(
             create(type, () => Msg(type)),
@@ -95,7 +94,7 @@ export namespace Msg {
                 0: type,
                 1: Msg.create(fullType, () => Msg(fullType)),
                 withPayload: <P, A extends any[] = [payload: P]>(
-                    prepare: Fn<A, P> = neutral as any,
+                    prepare: Fn<A, P> = same as any,
                 ) => ({
                     0: type,
                     1: Msg.create(fullType, (...a: A) => Msg(fullType, prepare(...a))),

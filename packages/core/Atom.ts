@@ -2,7 +2,7 @@ import { Reducer } from "./Reducer";
 import { createWireUtils, WiredReducer, WiringRoot } from "./Wire";
 import { TaskScheduler } from "./Task";
 import { Msg } from "./Msg";
-import { useSelector } from "./React";
+import { useSelector } from "../react/React";
 import { AnyStore } from "./Store";
 
 export interface Atom<TValue, TMsg extends Msg> {

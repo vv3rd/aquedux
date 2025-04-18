@@ -2,6 +2,8 @@ import { Reducer } from "./Reducer";
 import { Task } from "./Task";
 import { Msg, SomeMsg } from "./Msg";
 import { Pretty } from "../tools/ts";
+import { Immutable } from "../tools/objects";
+import { safe, same, noop } from "../tools/functions";
 
 export namespace Store {
     export const create = createStore;
@@ -13,7 +15,7 @@ export interface Store<TState, TCtx = {}> {
     dispatch: Dispatch;
     getState: () => TState;
 
-    context: Readonly<TCtx>;
+    context: Immutable<TCtx>;
 
     subscribe: (callback: ListenerCallback) => Subscription;
     unsubscribe: (callback: ListenerCallback) => void;
@@ -49,7 +51,7 @@ interface MsgStream<TState> extends Subscription, Disposable, AsyncIterable<Msg>
 export interface ListenerCallback {
     (): void;
 }
-export interface Listener {
+interface Listener {
     notify: ListenerCallback;
     cleanups: Array<() => void>;
 }
@@ -62,16 +64,9 @@ type StoreOverlay<TState, TCtx> = (
     creator: StoreCreator<TState, TCtx>,
 ) => StoreCreator<TState, TCtx>;
 
-type StoreCreator<TState, TCtx> = (
-    reducer: Reducer<TState>,
-    context: TCtx,
-    final: () => Store<TState, TCtx>,
-) => Store<TState, TCtx>;
+type StoreCreator<TState, TCtx> = (reducer: Reducer<TState>, context: TCtx) => Store<TState, TCtx>;
 
 export type AnyStore = Store<any, any>;
-
-const noop = () => {};
-const same = <T>(thing: T): T => thing;
 
 function createStore<TState, TCtx = {}>(
     reducer: Reducer<TState>,
@@ -83,11 +78,12 @@ function createStore<TState, TCtx = {}>(
         overlay?: StoreOverlay<TState, TCtx>;
     } = {},
 ) {
-    const store: Store<TState, TCtx> = overlay(createStoreImpl)(reducer, context, () => store);
+    const store: Store<TState, TCtx> = overlay(createStoreImpl(() => store))(reducer, context);
     return store;
 }
 
-const createStoreImpl: StoreCreator<any, any> = (reducer, context, final) => {
+type createStoreImpl = (final: () => Store<any, any>) => StoreCreator<any, any>;
+const createStoreImpl: createStoreImpl = (final) => (reducer, context) => {
     type TState = Reducer.InferState<typeof reducer>;
     type TMsg = Msg;
     type TCtx = typeof context;
@@ -159,16 +155,11 @@ const createStoreImpl: StoreCreator<any, any> = (reducer, context, final) => {
 
         execute(task) {
             const ac = new AbortController();
-            const close = () => ac.abort(new Error(FUCK_TASK_EXITED));
-            try {
-                const out = task(createStoreForTask(final(), ac.signal));
-                if (out instanceof Promise) {
-                    out.finally(close);
-                }
-                return out;
-            } finally {
-                close();
-            }
+            const doTask = safe(task, {
+                finally: () => ac.abort(new Error(FUCK_TASK_EXITED)),
+            });
+            const result = doTask(createStoreForTask(final(), ac.signal));
+            return result;
         },
 
         catch(...errors) {

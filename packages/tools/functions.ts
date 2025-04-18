@@ -18,9 +18,8 @@ export type Is<T> = (thing: unknown) => thing is T;
 
 export type Narrow<From, To extends From> = (input: From) => input is To;
 
-export const nothing = () => {};
-
-export const neutral = <T>(argument: T): T => argument;
+export const noop = () => {};
+export const same = <T>(thing: T): T => thing;
 
 export function memo<Fn extends (this: any, ...args: any[]) => any>(
     fn: Fn,
@@ -47,4 +46,40 @@ export function memo<Fn extends (this: any, ...args: any[]) => any>(
     }
 
     return Object.assign(memoizedFunction, fn);
+}
+
+// biome-ignore format:
+export function safe<F extends Fn.Any, E = never>(
+    func: F,
+    blocks: { catch?: (err: unknown) => E; finally?: () => void },
+): (...args: Parameters<F>) => ReturnType<F> | E {
+    const { catch: doCatch, finally: doFinally } = blocks;
+    if (!doCatch && doFinally) {
+        return (...args) => {
+            try {
+                let r = func(...args);
+                if (r instanceof Promise) r = r.finally(doFinally);
+                return r;
+            } finally { doFinally(); }
+        };
+    }
+    if (doCatch && !doFinally) {
+        return (...args) => {
+            try {
+                let r = func(...args);
+                if (r instanceof Promise) r = r.catch(doCatch);
+                return r;
+            } catch (err) { doCatch(err); }
+        };
+    }
+    if (doCatch && doFinally) {
+        return (...args) => {
+            try {
+                let r = func(...args);
+                if (r instanceof Promise) r = r.catch(doCatch).finally(doFinally);
+                return r;
+            } catch (err) { doCatch(err); } finally { doFinally(); }
+        };
+    }
+    return func;
 }

@@ -1,3 +1,6 @@
+import { Fn } from "./functions";
+import { primitive } from "./ts";
+
 const { prototype, getPrototypeOf } = Object;
 
 export function match<const T extends object>(
@@ -34,3 +37,13 @@ export function hash(object: object) {
         }
     });
 }
+
+export type Immutable<T> = T extends primitive | Fn.Any
+    ? T
+    : T extends Array<infer U>
+      ? ImmutableArray<U>
+      : ImmutableObject<T>;
+
+type ImmutableArray<T> = ReadonlyArray<Immutable<T>>;
+type ImmutableObject<T> = { readonly [K in keyof T]: Immutable<T[K]> };
+
