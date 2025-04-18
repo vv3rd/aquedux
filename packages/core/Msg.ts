@@ -21,7 +21,17 @@ export function Msg<T extends Msg.Type, P>(type: T, payload?: P) {
 }
 
 export namespace Msg {
-    export type Type = string & { readonly MsgType?: unique symbol };
+    export type Type = string;
+
+    export interface Matcher<TMsg extends Msg> {
+        match: (message: Msg) => message is TMsg;
+    }
+
+    export interface Token<T extends Msg.Type, TMsg extends Msg<T> = Msg<T>> extends Matcher<TMsg> {
+        type: T & {
+            [key in { readonly TMsg: unique symbol }["TMsg"]]: TMsg;
+        };
+    }
 
     export function create<T extends string, F extends FactoryFn<any[], T>>(type: T, createMsg: F) {
         type R = TypedFactory<F>;
@@ -50,10 +60,6 @@ export namespace Msg {
     export type SimpleFactory<T extends Msg.Type, P = void> = Matcher<{ type: T; payload: P }> & {
         (payload: P): { type: T; payload: P };
         type: T;
-    };
-
-    export type Matcher<TMsg extends Msg> = {
-        match: (message: Msg) => message is TMsg;
     };
 
     export type InferMatch<TMatcher extends Matcher<any>> = TMatcher extends Matcher<infer T>
