@@ -1,4 +1,3 @@
-import { Fn } from "./functions";
 
 export type Real = NonNullable<unknown>;
 export type Dict<T> = Record<string, T>;

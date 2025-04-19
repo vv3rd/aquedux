@@ -1,40 +1,41 @@
 import React, { createContext, use, useCallback, useSyncExternalStore } from "react";
-import { AnyStore } from "./Store";
+import { Control } from "../core/definition";
 
-const StoreContext = createContext<AnyStore | null>(null);
+const ControlContext = createContext<Control<unknown, unknown> | null>(null);
 
-export function StoreProvider({
-    store,
+export function ControlProvider({
+    control,
     children,
 }: {
-    store: AnyStore;
+    control: Control<unknown, unknown>;
+
     children?: React.ReactNode;
 }) {
-    return <StoreContext value={store}>{children}</StoreContext>;
+    return <ControlContext value={control}>{children}</ControlContext>;
 }
 
-function useStore() {
-    const store = use(StoreContext);
+function useControl() {
+    const store = use(ControlContext);
     if (store == null) {
-        throw new Error("Have StoreContext");
+        throw new Error("Have ControlContext");
     }
     return store;
 }
 
-export interface StoreRegistry {
+export interface ControlRegistry {
     global: any;
 }
 
-export function useSelector<T, S extends keyof StoreRegistry = "global">(
-    selector: (state: StoreRegistry[S]) => T,
+export function useSelector<T, S extends keyof ControlRegistry = "global">(
+    selector: (state: ControlRegistry[S]) => T,
 ) {
-    const store = useStore();
-    const snapshot = useCallback(() => selector(store.getState()), [store, selector]);
-    const value = useSyncExternalStore(store.subscribe, snapshot, snapshot);
+    const ctl = useControl();
+    const snapshot = useCallback(() => selector(ctl.getState()), [ctl, selector]);
+    const value = useSyncExternalStore(ctl.subscribe, snapshot, snapshot);
     return value;
 }
 
 export function useDispatch() {
-    const store = useStore();
-    return store.dispatch;
+    const ctl = useControl();
+    return ctl.dispatch;
 }

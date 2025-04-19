@@ -1,13 +1,11 @@
-import { Msg, type SomeMsg } from "./Msg";
-import type { Reducer } from "./Reducer";
-import type { AnyStore, StoreInTask } from "./Store";
-import { Task, type TaskScheduler } from "./Task";
+import type { Reducer, TaskPush, TaskControl, Control, Task } from "./definition";
+import { Msg } from "./Msg";
 
 export namespace Wire {}
 
 const probeKey = Symbol();
-const probeMsg = Msg.ofType(`wire-${Math.round(Math.random() * 100)}`).withPayload(
-    (task: (wireId: string) => (api: AnyStore) => void) => ({
+const probeMsg = Msg.define(`wire-${Math.round(Math.random() * 100)}`).with(
+    (task: (wireId: string) => (ctl: Control<any, any>) => void) => ({
         [probeKey]: task,
     }),
 );
@@ -23,7 +21,7 @@ export interface WiredReducer<TState> extends Reducer<TState> {
 
 export function createWireUtils<TState>() {
     const wireId = Math.random().toString(36).substring(2);
-    function connectWire(msg: Msg, exec: TaskScheduler<TState>) {
+    function connectWire(msg: Msg, exec: TaskPush<TState>) {
         if (probeMsg.match(msg)) {
             exec(msg.payload[probeKey](wireId));
         }
@@ -40,27 +38,25 @@ export function createWireUtils<TState>() {
 
 export function createWire<TState>(reducer: Reducer<TState>): WiredReducer<TState> {
     const [connect, selectSelf] = createWireUtils<TState>();
-    const wiredReducer: WiredReducer<TState> = (state, msg, schedule) => {
-        connect(msg, schedule);
-        return reducer(state, msg, schedule);
+    const wiredReducer: WiredReducer<TState> = (state, msg, out) => {
+        connect(msg, out);
+        return reducer(state, msg, out);
     };
     wiredReducer.select = selectSelf;
     return wiredReducer;
 }
 
-export function createWiringRoot<TState extends object, TCtx>(
-    reducer: Reducer<TState, SomeMsg, TCtx>,
-) {
+export function createWiringRoot<TState extends object, TCtx>(reducer: Reducer<TState, Msg, TCtx>) {
     type WiredState = WiringRoot & TState;
     const wireMeta: Record<string, (state: WiredState) => unknown> = {};
     const probe = probeMsg((wireId) => (api) => {
         wireMeta[wireId] = createWireSelector(api.getState);
     });
-    const tasks = Task.pool<any, WiredState, TCtx>();
+    let tasks: Task<any, WiredState, TCtx>[] = [];
     try {
-        reducer(undefined, probe as any, tasks.getScheduler());
+        reducer(undefined, probe as any, (cmd) => tasks.push(cmd));
     } finally {
-        tasks.lockScheduler();
+        tasks = [...tasks];
     }
     for (const task of tasks) {
         task({ ...stubTaskControls, getState: () => stateGetter() });
@@ -69,7 +65,7 @@ export function createWiringRoot<TState extends object, TCtx>(
     let stateGetter = function lockedStateGetter(): WiredState {
         throw new Error(
             "This should not happen unless you doing something " +
-                "very wrong with scoping TaskScheduler-s or TaskControls-s",
+                "very wrong with scoping Yielder-s or TaskControls-s",
         );
     };
 
@@ -85,8 +81,8 @@ export function createWiringRoot<TState extends object, TCtx>(
         };
     }
 
-    const wiringRootReducer: Reducer<WiredState, SomeMsg, TCtx> = (state, msg, schedule) => {
-        state = reducer(state, msg, schedule);
+    const wiringRootReducer: Reducer<WiredState, Msg, TCtx> = (state, msg, push) => {
+        state = reducer(state, msg, push);
         if (!(wiringKey in state)) {
             state = { ...state, [wiringKey]: wireMeta };
         }
@@ -97,7 +93,7 @@ export function createWiringRoot<TState extends object, TCtx>(
 }
 
 // biome-ignore format:
-const stubTaskControls: StoreInTask<any, any> = {
+const stubTaskControls: TaskControl<any, any> = {
     context: {},
     signal: AbortSignal.abort(),
     execute() { throw new Error(FUCK_TASK_NOT_REAL); },

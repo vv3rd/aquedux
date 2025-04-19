@@ -1,17 +1,45 @@
-import { Reducer } from "./Reducer";
-import { Task } from "./Task";
-import { Msg, SomeMsg } from "./Msg";
 import { Pretty } from "../tools/ts";
 import { Immutable } from "../tools/objects";
-import { safe, same, noop } from "../tools/functions";
+import { safe, same, noop, Is } from "../tools/functions";
 
-export namespace Store {
-    export const create = createStore;
-    export const scoped = createScopedStore;
-    export const forTask = createStoreForTask;
+export interface Msg<T extends string = string> {
+    type: T;
 }
 
-export interface Store<TState, TCtx = {}> {
+export interface MsgWith<P, T extends string = string> extends Msg<T> {
+    payload: P;
+}
+
+export interface MsgToken<TMsg extends Msg = Msg, TArgs extends any[] = any[]> {
+    type: TMsg["type"] & {
+        [key in { readonly TMsg: unique symbol }["TMsg"]]: TMsg;
+    };
+    init: (...args: TArgs) => TMsg;
+    match: Is<TMsg>;
+}
+
+interface Dispatch {
+    <T extends MsgToken>(token: T, ...args: Parameters<T["init"]>): void;
+}
+
+export interface Reducer<TState, TMsg = Msg, TCtx = {}> {
+    (state: TState | undefined, msg: TMsg, push: TaskPush<TState, TCtx>): TState;
+}
+
+export interface TaskPush<TState, TCtx = {}> {
+    (task: Task<void, TState, TCtx>): void;
+}
+
+export interface Task<TResult, TState, TCtx = {}> {
+    (control: TaskControl<TState, TCtx>): TResult;
+}
+
+export interface TaskControl<TState, TCtx = {}> extends Control<TState, TCtx> {
+    subscribe: (callback?: ListenerCallback) => MsgStream<TState>;
+    signal: AbortSignal;
+}
+
+export interface Control<TState, TCtx = {}> {
     dispatch: Dispatch;
     getState: () => TState;
 
@@ -22,11 +50,6 @@ export interface Store<TState, TCtx = {}> {
 
     execute: <T>(task: Task<T, TState, TCtx>) => T;
     catch: (...errors: unknown[]) => void;
-}
-
-export interface StoreInTask<TState, TCtx = {}> extends Store<TState, TCtx> {
-    subscribe: (callback?: ListenerCallback) => MsgStream<TState>;
-    signal: AbortSignal;
 }
 
 interface Unsubscribe {
@@ -44,11 +67,11 @@ interface MsgStream<TState> extends Subscription, Disposable, AsyncIterable<Msg>
         (checker: (state: TState) => boolean): Promise<TState>;
         <U extends TState>(predicate: (state: TState) => state is U): Promise<U>;
         <T>(selector: (state: TState) => T | null | undefined | false): Promise<T>;
-        <M extends Msg>(matcher: Msg.Matcher<M>): Promise<M>;
+        <M extends Msg>(matcher: MsgToken<M>): Promise<M>;
     };
 }
 
-export interface ListenerCallback {
+interface ListenerCallback {
     (): void;
 }
 interface Listener {
@@ -56,38 +79,47 @@ interface Listener {
     cleanups: Array<() => void>;
 }
 
-export interface Dispatch<TMsg = SomeMsg> {
-    (action: TMsg): void;
+export namespace Reducer {
+    export function initialize<TState>(reducer: Reducer<TState>): TState {
+        return reducer(undefined, { type: Math.random().toString(36).substring(2) }, noop);
+    }
+
+    export type InferMsg<R> = R extends Reducer<any> ? Msg : never;
+    export type InferState<R> = R extends Reducer<infer S> ? S : never;
 }
 
-type StoreOverlay<TState, TCtx> = (
-    creator: StoreCreator<TState, TCtx>,
-) => StoreCreator<TState, TCtx>;
+type ControlOverlay<TState, TCtx> = (
+    creator: ControlCreator<TState, TCtx>,
+    final: () => Control<TState, TCtx>,
+) => ControlCreator<TState, TCtx>;
 
-type StoreCreator<TState, TCtx> = (reducer: Reducer<TState>, context: TCtx) => Store<TState, TCtx>;
+type ControlCreator<TState, TCtx> = (
+    reducer: Reducer<TState, Msg<any>, TCtx>,
+    context: TCtx,
+) => Control<TState, TCtx>;
 
-export type AnyStore = Store<any, any>;
-
-function createStore<TState, TCtx = {}>(
-    reducer: Reducer<TState>,
+export function createControl<TState, TCtx = {}>(
+    reducer: Reducer<TState, Msg<any>, TCtx>,
     {
         context = {} as TCtx,
         overlay = same,
     }: {
         context?: TCtx;
-        overlay?: StoreOverlay<TState, TCtx>;
+        overlay?: ControlOverlay<TState, TCtx>;
     } = {},
 ) {
-    const store: Store<TState, TCtx> = overlay(createStoreImpl(() => store))(reducer, context);
-    return store;
+    const get = () => it;
+    const create = overlay(createControlImpl(get), get);
+    const it: Control<TState, TCtx> = create(reducer, context);
+    return it;
 }
 
-type createStoreImpl = (final: () => Store<any, any>) => StoreCreator<any, any>;
-const createStoreImpl: createStoreImpl = (final) => (reducer, context) => {
+type createControlImpl = (final: () => Control<any, any>) => ControlCreator<any, any>;
+const createControlImpl: createControlImpl = (final) => (reducer, context) => {
     type TState = Reducer.InferState<typeof reducer>;
     type TMsg = Msg;
     type TCtx = typeof context;
-    type TSelf = Store<TState, TCtx>;
+    type TSelf = Control<TState, TCtx>;
 
     let state: TState = Reducer.initialize(reducer);
     let lastMsg: TMsg;
@@ -95,23 +127,24 @@ const createStoreImpl: createStoreImpl = (final) => (reducer, context) => {
 
     const listeners = new Map<ListenerCallback, Listener>();
 
-    const activeStore: TSelf = {
+    const activeControl: TSelf = {
         context,
         getState() {
             return state;
         },
 
-        dispatch(msg) {
+        dispatch(token, ...args) {
+            let msg = token.init(...args);
             if (msg == null) {
                 return;
             }
-            const taskPool = Task.pool<void, TState, TCtx>();
+            let tasks: Task<void, TState, TCtx>[] = [];
             try {
-                delegate = lockedStore;
-                state = reducer(state, msg, taskPool.getScheduler());
+                delegate = lockedControl;
+                state = reducer(state, msg, (cmd) => tasks.push(cmd));
             } finally {
-                delegate = activeStore;
-                taskPool.lockScheduler();
+                delegate = activeControl;
+                tasks = [...tasks];
             }
             lastMsg = msg;
             nextMsg.resolve(msg);
@@ -122,7 +155,7 @@ const createStoreImpl: createStoreImpl = (final) => (reducer, context) => {
             // biome-ignore format:
             for (const {notify} of listeners.values()) try { notify() } catch (e) { errs.push(e) }
             // biome-ignore format:
-            for (const task of taskPool) try { self.execute(task) } catch (e) { errs.push(e) }
+            for (const task of tasks) try { self.execute(task) } catch (e) { errs.push(e) }
             if (errs.length) {
                 self.catch(...errs);
             }
@@ -156,9 +189,9 @@ const createStoreImpl: createStoreImpl = (final) => (reducer, context) => {
         execute(task) {
             const ac = new AbortController();
             const doTask = safe(task, {
-                finally: () => ac.abort(new Error(FUCK_TASK_EXITED)),
+                finally: () => ac.abort(new Error(TASK_EXITED_ERR)),
             });
-            const result = doTask(createStoreForTask(final(), ac.signal));
+            const result = doTask(createTaskControl(final(), ac.signal));
             return result;
         },
 
@@ -169,17 +202,17 @@ const createStoreImpl: createStoreImpl = (final) => (reducer, context) => {
         },
     };
 
-    let delegate: TSelf = activeStore;
+    let delegate: TSelf = activeControl;
 
     // biome-ignore format: saves space
-    const lockedStore: TSelf = {
+    const lockedControl: TSelf = {
         context,
-        dispatch() { throw new Error(FUCK_STORE_LOCKED); },
-        execute() { throw new Error(FUCK_STORE_LOCKED); },
-        catch() { throw new Error(FUCK_STORE_LOCKED); },
-        getState() { throw new Error(FUCK_STORE_LOCKED); },
-        subscribe() { throw new Error(FUCK_STORE_LOCKED); },
-        unsubscribe() { throw new Error(FUCK_STORE_LOCKED); },
+        dispatch() { throw new Error(CTRL_LOCKED_ERR); },
+        execute() { throw new Error(CTRL_LOCKED_ERR); },
+        catch() { throw new Error(CTRL_LOCKED_ERR); },
+        getState() { throw new Error(CTRL_LOCKED_ERR); },
+        subscribe() { throw new Error(CTRL_LOCKED_ERR); },
+        unsubscribe() { throw new Error(CTRL_LOCKED_ERR); },
     };
 
     // biome-ignore format: better visual
@@ -194,10 +227,10 @@ const createStoreImpl: createStoreImpl = (final) => (reducer, context) => {
 	};
 };
 
-function createStoreForTask<TState, TCtx>(
-    base: Store<TState, TCtx>,
+export function createTaskControl<TState, TCtx>(
+    base: Control<TState, TCtx>,
     signal: AbortSignal,
-): StoreInTask<TState, TCtx> {
+): TaskControl<TState, TCtx> {
     return { ...base, subscribe, signal };
 
     function subscribe(listener: ListenerCallback = noop): MsgStream<TState> {
@@ -261,21 +294,5 @@ function createStoreForTask<TState, TCtx>(
     }
 }
 
-function createScopedStore<TStateA, TStateB, TCtx>(
-    base: Store<TStateA, TCtx>,
-    selector: (state: TStateA) => TStateB,
-): Store<TStateB, TCtx> {
-    const self: Store<TStateB, TCtx> = {
-        ...base,
-        getState() {
-            return selector(base.getState());
-        },
-        execute(task) {
-            return base.execute(({ signal }) => task(createStoreForTask(self, signal)));
-        },
-    };
-    return self;
-}
-
-const FUCK_STORE_LOCKED = "Store is locked on dispatch";
-const FUCK_TASK_EXITED = "Task function completed, nextMessage rejects.";
+const CTRL_LOCKED_ERR = "Control is locked on dispatch";
+const TASK_EXITED_ERR = "Task function completed, nextMessage rejects.";

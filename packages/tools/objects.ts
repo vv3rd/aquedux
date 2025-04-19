@@ -1,7 +1,9 @@
 import { Fn } from "./functions";
-import { primitive } from "./ts";
+import type { primitive } from "./ts";
 
-const { prototype, getPrototypeOf } = Object;
+const { prototype, getPrototypeOf, entries } = Object;
+
+export const asEntries = entries as <T>(object: T) => [keyof T, T[keyof T]][];
 
 export function match<const T extends object>(
     thing: unknown,
@@ -23,7 +25,7 @@ export function isPlainObject(thing: any): thing is { [key: PropertyKey]: unknow
     return getPrototypeOf(thing) === prototype || getPrototypeOf(thing) === null;
 }
 
-export function hash(object: object) {
+export function sortToString(object: object) {
     return JSON.stringify(object, (_, original) => {
         if (isPlainObject(original)) {
             const keys = Object.keys(original).sort();
@@ -46,4 +48,3 @@ export type Immutable<T> = T extends primitive | Fn.Any
 
 type ImmutableArray<T> = ReadonlyArray<Immutable<T>>;
 type ImmutableObject<T> = { readonly [K in keyof T]: Immutable<T[K]> };
-

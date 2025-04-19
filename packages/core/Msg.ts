@@ -9,10 +9,6 @@ export interface MsgWith<P, T extends Msg.Type = Msg.Type> extends Msg<T> {
     payload: P;
 }
 
-export type SomeMsg = Msg & {
-    [key in string]: unknown;
-};
-
 export function Msg<T extends Msg.Type, P>(type: T, payload: P): MsgWith<P, T>;
 export function Msg<T extends Msg.Type>(type: T): Msg<T>;
 export function Msg<T extends Msg.Type, P>(type: T, payload?: P) {
@@ -66,9 +62,9 @@ export namespace Msg {
         ? T
         : never;
 
-    export function ofType<T extends string>(type: T) {
+    export function define<T extends string>(type: T) {
         const builders = {
-            withPayload: <P, A extends unknown[] = [payload: P]>(prepare: Fn<A, P> = same as any) =>
+            with: <P, A extends unknown[] = [payload: P]>(prepare: Fn<A, P> = same as any) =>
                 create(type, (...a: A) => Msg(type, prepare(...a))),
         };
         return Object.assign(
@@ -93,9 +89,7 @@ export namespace Msg {
             return {
                 0: type,
                 1: Msg.create(fullType, () => Msg(fullType)),
-                withPayload: <P, A extends any[] = [payload: P]>(
-                    prepare: Fn<A, P> = same as any,
-                ) => ({
+                with: <P, A extends any[] = [payload: P]>(prepare: Fn<A, P> = same as any) => ({
                     0: type,
                     1: Msg.create(fullType, (...a: A) => Msg(fullType, prepare(...a))),
                 }),

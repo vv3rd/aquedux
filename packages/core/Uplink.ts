@@ -1,7 +1,6 @@
 import { Msg, MsgWith } from "./Msg";
-import { StoreInTask } from "./Store";
-import { Task, TaskScheduler } from "./Task";
-import { isPlainObject } from "../tools/objects";
+import { sortToString } from "../tools/objects";
+import { TaskPush, Task, TaskControl } from "./definition";
 
 enum LoadProgress {
     Started = 0,
@@ -9,10 +8,9 @@ enum LoadProgress {
     GotError = -1,
 }
 
-enum TaskStatus {
-    Idle,
-    Paused,
-    Running,
+interface UplinkMeta {
+    valueUpdatedAt: number;
+    errorUpdatedAt: number;
 }
 
 // biome-ignore format:
@@ -21,56 +19,36 @@ type UplinkResultsForStatus<R> = {
     [LoadProgress.GotValue]: { value: R;             error: undefined };
     [LoadProgress.GotError]: { value: R | undefined; error: Error };
 };
-
-type ValueForStatus<S extends LoadProgress, R> = UplinkResultsForStatus<R>[S]["value"];
-type ErrorForStatus<S extends LoadProgress, R> = UplinkResultsForStatus<R>[S]["error"];
-
-interface UplinkMeta {
-    valueUpdatedAt: number;
-    errorUpdatedAt: number;
-}
-
-interface UplinkLike<R> {
-    taskStatus: TaskStatus;
+interface AbstractUplink<R> extends UplinkMeta {
     progress: LoadProgress;
-    value: ValueForStatus<this["progress"], R>;
-    error: ErrorForStatus<this["progress"], R>;
+    value: UplinkResultsForStatus<R>[this["progress"]]["value"];
+    error: UplinkResultsForStatus<R>[this["progress"]]["error"];
 }
-
-interface SomeUplink<R> extends UplinkLike<R>, UplinkMeta {}
-
-interface UplinkStarted<R> extends SomeUplink<R> {
+interface StartedUplink<R> extends AbstractUplink<R> {
     progress: LoadProgress.Started;
 }
-interface HasValueUplink<R> extends SomeUplink<R> {
+interface HasValueUplink<R> extends AbstractUplink<R> {
     progress: LoadProgress.GotValue;
 }
-interface HasErrorUplink<R> extends SomeUplink<R> {
+interface HasErrorUplink<R> extends AbstractUplink<R> {
     progress: LoadProgress.GotError;
 }
 
-export type Uplink<R> =  UplinkStarted<R> | HasErrorUplink<R> | HasValueUplink<R>;
+export type Uplink<R> = StartedUplink<R> | HasErrorUplink<R> | HasValueUplink<R>;
 
-namespace Uplink {
-    export const isResolved = <R>(cache: Uplink<R>): cache is HasValueUplink<R> => {
-        return cache.progress === LoadProgress.GotValue;
+function createStarted<TVal>(): StartedUplink<TVal> {
+    return {
+        value: undefined,
+        error: undefined,
+        progress: LoadProgress.Started,
+        ...createMeta(),
     };
-    export const isSettled = <R>(cache: Uplink<R>): cache is HasValueUplink<R> | HasErrorUplink<R> => {
-        return  cache.progress !== LoadProgress.Started;
-    };
-    export const isStarted = <R>(cache: Uplink<R>): cache is UplinkStarted<R> => {
-        return !isSettled(cache);
-    };
+}
 
-    export const create = <TVal>(): UplinkStarted<TVal> => {
-        return {
-            value: undefined,
-            error: undefined,
-            valueUpdatedAt: 0,
-            errorUpdatedAt: 0,
-            progress: LoadProgress.Started,
-            taskStatus: TaskStatus.Idle,
-        };
+function createMeta(): UplinkMeta {
+    return {
+        valueUpdatedAt: 0,
+        errorUpdatedAt: 0,
     };
 }
 
@@ -80,6 +58,9 @@ interface UplinkCacheLifetime<TVal> {
     shouldSet: (instance: Uplink<TVal>, msg: Msg) => msg is MsgWith<TVal>;
     untilGarbage: number;
     untilStale: number;
+    // maybe instead do something like
+    // shouldEvict: (instaces: Uplink<TVal> & UplinkMeta) => string[]
+    // scheduleEvictionCheck: (idk) => Task
 }
 
 interface UplinkValueStructure<TVal, TIn> {
@@ -87,16 +68,14 @@ interface UplinkValueStructure<TVal, TIn> {
     match: (current: TVal, incomming: TVal) => boolean;
 }
 
-interface UplinkSetup<TVal, TIn> {
+interface UplinkSetup<TVal, TIn, TOut = TVal> {
     name: string;
-    fetch: (input: TIn) => UplinkFetchTask<TVal>;
+    // TOut can be Response, then I'll have a `parse` func to get the TVal, this
+    // will then allow me to have `measure` func in CacheLifetime to get the size of the object
+    // from Content-Length. When TOut is something other than Request, other measuring methods can be used
+    fetch: (input: TIn) => UplinkFetchTask<TOut>;
     lifetime: UplinkCacheLifetime<TVal>;
     structure: UplinkValueStructure<TVal, TIn>;
-}
-
-interface UplinkSetupFacade<TVal, TIn> {
-    name: string;
-    fetch: (input: TIn, api: StoreInTask<Uplink<TVal>>) => OptionalPromise<TVal>;
 }
 
 type OptionalPromise<T> = void | Promise<void | T>;
@@ -104,54 +83,68 @@ type OptionalPromise<T> = void | Promise<void | T>;
 type UplinkFetchTask<TVal> = Task<OptionalPromise<TVal>, Uplink<TVal>>;
 
 interface UplinkState<TVal, TIn> {
-    caches: {
+    results: {
         [key in string]: Uplink<TVal>;
+    };
+    inputs: {
+        [key in string]: TIn;
     };
 }
 
-function createUplinkImpl<TVal, TIn>(setup: UplinkSetup<TVal, TIn>) {
-    const { name: cacheName, fetch: fetchValue, lifetime, structure } = setup;
+function createUplinkImpl<TVal, TIn, TOut = TVal>(setup: UplinkSetup<TVal, TIn, TOut>) {
     type TUplinkState = UplinkState<TVal, TIn>;
+    type TTaskCtl = TaskControl<TUplinkState>;
     type TUplink = Uplink<TVal>;
 
-    function createCahceState(key: string, instance: TUplink): TUplinkState {
-        return { caches: { [key]: instance } };
+    // const { name: cacheName, fetch: fetchValue, lifetime, structure } = setup;
+
+    function createUplinkState(key: string, instance: TUplink): TUplinkState {
+        return { results: { [key]: instance }, inputs: {} };
     }
 
-    function resourceIsObserved(msg: Msg): msg is MsgWith<{ input: TIn; initialValue?: TVal }> {
+    function resourceIsObserved(_msg: Msg): _msg is MsgWith<{ input: TIn; initialValue?: TVal }> {
         TODO();
     }
 
-    function resourceIsUnobserved(msg: Msg): boolean {
+    function resourceIsUnobserved(_msg: Msg): boolean {
         TODO();
     }
 
-    function instanceIsStale(instance: TUplink): boolean {
+    function instanceIsStale(_instance: TUplink): boolean {
         TODO();
     }
 
-    function observe(input: TIn, initialValue?: TVal): UplinkFetchTask<TVal> {
+    function observe(input: TIn) {
         let key = inputToKey({ input });
-        return (scope) => {};
+        return (ctl: TTaskCtl) => {
+            observersCount.increment(ctl.context, key);
+        };
+    }
+
+    function unobserve(input: TIn) {
+        let key = inputToKey({ input });
+        return async (ctl: TTaskCtl) => {
+            observersCount.decrement(ctl.context, key);
+        };
     }
 
     function reduceUplink(
         state: TUplinkState | null = null,
         msg: Msg,
-        schedule: TaskScheduler<TVal>,
+        out: TaskPush<TVal>,
     ): TUplinkState | null {
         if (resourceIsObserved(msg)) {
             let key = inputToKey(msg.payload);
-            let instance = state && state.caches[key];
+            let instance = state && state.results[key];
             if (instance == null) {
-                instance = Uplink.create();
+                instance = createStarted();
             }
             if (instance.progress === LoadProgress.Started) {
-                schedule(({ dispatch }) => {});
+                out(() => {});
                 // instance =
             }
             if (state == null) {
-                state = createCahceState(key, instance);
+                state = createUplinkState(key, instance);
             }
             return state;
         }
@@ -167,25 +160,7 @@ function inputToKey({ input }: { input: unknown }) {
     if (input == null) {
         return "-";
     }
-    if (typeof input === "object") {
-        return sortAndJson(input);
-    }
-    return String(input);
-}
-
-export function sortAndJson(object: object) {
-    return JSON.stringify(object, (_, original) => {
-        if (isPlainObject(original)) {
-            const keys = Object.keys(original).sort();
-            const sorted: any = {};
-            for (const key of keys) {
-                sorted[key] = original[key];
-            }
-            return sorted;
-        } else {
-            return original;
-        }
-    });
+    return sortToString(input);
 }
 
 /*
@@ -198,3 +173,34 @@ TODO: consider
 function TODO(): never {
     throw new Error("TODO");
 }
+
+/**
+ * @deprecated
+ * it's better to not use this at all, just update cache when new entries are added or special GC msg is dispatched
+ */
+const observersCount = new (class ObserversCount {
+    #maps = new WeakMap<{}, Map<string, number>>();
+    increment(scopeKey: {}, inputHash: string) {
+        let countMap = this.#maps.get(scopeKey);
+        if (countMap == null) {
+            countMap = new Map();
+            this.#maps.set(scopeKey, countMap);
+        }
+        let count = (countMap.get(inputHash) ?? 0) + 1;
+        countMap.set(inputHash, count);
+        return count;
+    }
+    decrement(scopeKey: {}, inputHash: string) {
+        let countMap = this.#maps.get(scopeKey);
+        if (countMap == null) {
+            return 0;
+        }
+        let count = countMap.get(inputHash) ?? 0;
+        if (count <= 0) {
+            return 0;
+        }
+        count -= 1;
+        countMap.set(inputHash, count);
+        return count;
+    }
+})();
