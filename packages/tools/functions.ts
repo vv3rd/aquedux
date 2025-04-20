@@ -6,6 +6,8 @@ export declare namespace Fn {
     ) => but extends { returns: {} } ? but["returns"] : ReturnType<func>;
 
     type Any = (...args: any[]) => any;
+
+    type Arg<F extends Any> = F extends (argument: infer A) => any ? A : void;
 }
 
 export type Callback = () => void;

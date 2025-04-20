@@ -8,7 +8,7 @@ import {
     ErrFallbackEl,
     silenceExpectedConsoleError,
 } from "./help";
-import { createControl, MsgToken } from "../packages/core/definition";
+import { createControl } from "../packages/core/definition";
 
 silenceExpectedConsoleError();
 
@@ -32,14 +32,8 @@ test("catches", async () => {
     expect(screen.getByTestId(ErrFallbackEl)).toBeInTheDocument();
 });
 
-declare const inc: MsgToken<{type: "inc"}, [number]>
-declare const dec: MsgToken<{type: "dec"}, [number]>
-
 const reducer = (model = 0, msg: { type: "inc" } | { type: "dec" }) => {
     return model;
 };
 
 const ctl = createControl(reducer);
-
-
-ctl.dispatch(inc, 0)

@@ -1,9 +1,17 @@
 import { Fn } from "./functions";
 import type { primitive } from "./ts";
 
-const { prototype, getPrototypeOf, entries } = Object;
+const { prototype, getPrototypeOf, entries, fromEntries } = Object;
 
 export const asEntries = entries as <T>(object: T) => [keyof T, T[keyof T]][];
+
+export function reimplement<T extends object, U>(
+    object: T,
+    map: (key: keyof T, value: T[keyof T]) => typeof value,
+) {
+    const newObject = fromEntries(asEntries(object).map(([key, value]) => [key, map(key, value)]))
+    return newObject as T
+}
 
 export function match<const T extends object>(
     thing: unknown,

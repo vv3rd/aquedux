@@ -1,6 +1,5 @@
-import { Msg, MsgWith } from "./Msg";
 import { sortToString } from "../tools/objects";
-import { TaskPush, Task, TaskControl } from "./definition";
+import { TaskPush, Task, TaskControl, Msg, MsgWith } from "./definition";
 
 enum LoadProgress {
     Started = 0,

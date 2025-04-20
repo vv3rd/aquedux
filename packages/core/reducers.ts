@@ -1,7 +1,39 @@
-import { Msg, MsgWith } from "./Msg";
+import { asEntries } from "../tools/objects";
+import * as Msgs from "./messages";
 import { isPlainObject } from "../tools/objects";
 import { Fn } from "../tools/functions";
-import { TaskPush, Reducer } from "./definition";
+import { TaskPush, Reducer, MsgWith, Msg } from "./definition";
+import { createScopedPush } from "./scoping";
+
+type combineReducers = <
+    T extends {
+        [key in string]: Reducer<any, any>;
+    },
+>(
+    reducersObject: T,
+) => Reducer<{
+    [K in keyof T]: T[K] extends Reducer<infer TState> ? TState : never;
+}>;
+
+export const combineReducers: combineReducers = (reducersObject) => {
+    const reducers = asEntries(reducersObject);
+
+    return function combination(current, action, command) {
+        let next = current!;
+        for (let [key, reducer] of reducers) {
+            const scopedCommand = createScopedPush(command, (s) => s[key]);
+            const stateWas = current?.[key];
+            const stateNow = reducer(stateWas, action, scopedCommand);
+            if (stateWas !== stateNow) {
+                if (next === current) {
+                    next = { ...current };
+                }
+                next[key] = stateNow;
+            }
+        }
+        return next;
+    };
+};
 
 export function createClass<
     T,
@@ -12,7 +44,7 @@ export function createClass<
 >(reducerName: N, initialState: T, updaters: R & ThisType<Accessor<T>>) {
     type Addressed<K extends string> = `${N}/${K}`;
     type TMsgs = {
-        [K in keyof R & string]: Msg.TypedFactory<
+        [K in keyof R & string]: Msgs.TypedFactory<
             Fn.Like<R[K], { returns: MsgWith<Parameters<R[K]>, Addressed<K>> }>
         >;
     };
@@ -20,7 +52,7 @@ export function createClass<
 
     const keys = Object.keys(updaters);
     const messages = Object.fromEntries(
-        keys.map((key) => [key, Msg.define(`${reducerName}/${key}`).with<any[]>()]),
+        keys.map((key) => [key, Msgs.define(`${reducerName}/${key}`).with<any[]>()]),
     ) as unknown as TMsgs;
 
     const isMatchingMsg = (msg: Msg): msg is TMsg =>

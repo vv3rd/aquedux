@@ -1,30 +1,28 @@
 import { Pretty } from "../tools/ts";
 import { Immutable } from "../tools/objects";
-import { safe, same, noop, Is } from "../tools/functions";
+import { safe, same, noop, Is, Callback } from "../tools/functions";
 
-export interface Msg<T extends string = string> {
+export interface Msg<T extends Msg.Type = Msg.Type> {
     type: T;
 }
 
-export interface MsgWith<P, T extends string = string> extends Msg<T> {
+export interface MsgWith<P, T extends Msg.Type = Msg.Type> extends Msg<T> {
     payload: P;
 }
 
-export interface MsgToken<TMsg extends Msg = Msg, TArgs extends any[] = any[]> {
-    type: TMsg["type"] & {
-        [key in { readonly TMsg: unique symbol }["TMsg"]]: TMsg;
-    };
-    init: (...args: TArgs) => TMsg;
-    match: Is<TMsg>;
-}
-
 interface Dispatch {
-    <T extends MsgToken>(token: T, ...args: Parameters<T["init"]>): void;
+    (message: Msg): void;
 }
 
 export interface Reducer<TState, TMsg = Msg, TCtx = {}> {
     (state: TState | undefined, msg: TMsg, push: TaskPush<TState, TCtx>): TState;
 }
+
+export interface Agent<TState, TCtx = {}, TMsg = Msg> {
+    (state: TState | undefined, msg: TMsg): AgentResult<TState, TCtx>;
+}
+
+export type AgentResult<TState, TCtx> = Generator<Task<void, TState, TCtx>, TState, void>;
 
 export interface TaskPush<TState, TCtx = {}> {
     (task: Task<void, TState, TCtx>): void;
@@ -35,7 +33,7 @@ export interface Task<TResult, TState, TCtx = {}> {
 }
 
 export interface TaskControl<TState, TCtx = {}> extends Control<TState, TCtx> {
-    subscribe: (callback?: ListenerCallback) => MsgStream<TState>;
+    subscribe: (callback?: Callback) => MsgStream<TState>;
     signal: AbortSignal;
 }
 
@@ -45,8 +43,8 @@ export interface Control<TState, TCtx = {}> {
 
     context: Immutable<TCtx>;
 
-    subscribe: (callback: ListenerCallback) => Subscription;
-    unsubscribe: (callback: ListenerCallback) => void;
+    subscribe: (callback: Callback) => Subscription;
+    unsubscribe: (callback: Callback) => void;
 
     execute: <T>(task: Task<T, TState, TCtx>) => T;
     catch: (...errors: unknown[]) => void;
@@ -62,21 +60,26 @@ interface Subscription extends Unsubscribe {
     lastMessage: () => Msg;
 }
 
-interface MsgStream<TState> extends Subscription, Disposable, AsyncIterable<Msg> {
+interface MsgStream<TState> extends Subscription, AsyncIterable<Msg> {
     query: {
         (checker: (state: TState) => boolean): Promise<TState>;
         <U extends TState>(predicate: (state: TState) => state is U): Promise<U>;
         <T>(selector: (state: TState) => T | null | undefined | false): Promise<T>;
-        <M extends Msg>(matcher: MsgToken<M>): Promise<M>;
+        <M extends Msg>(matcher: { match: Is<M> }): Promise<M>;
     };
 }
 
-interface ListenerCallback {
-    (): void;
+export namespace Msg {
+    export type Type = string;
+    export interface Matcher<TMsg extends Msg> {
+        match: (message: Msg) => message is TMsg;
+    }
+    export type inferPayload<M> = M extends MsgWith<infer P> ? P : void
 }
-interface Listener {
-    notify: ListenerCallback;
-    cleanups: Array<() => void>;
+
+export namespace Control {
+    export type inferCtx<R> = R extends Control<any, infer TCtx> ? TCtx : never;
+    export type inferState<R> = R extends Control<infer S, any> ? S : never;
 }
 
 export namespace Reducer {
@@ -84,9 +87,38 @@ export namespace Reducer {
         return reducer(undefined, { type: Math.random().toString(36).substring(2) }, noop);
     }
 
-    export type InferMsg<R> = R extends Reducer<any> ? Msg : never;
-    export type InferState<R> = R extends Reducer<infer S> ? S : never;
+    export type inferMsg<R> = R extends Reducer<any, infer TMsg, any> ? TMsg : never;
+    export type inferCtx<R> = R extends Reducer<any, any, infer TCtx> ? TCtx : never;
+    export type inferState<R> = R extends Reducer<infer S> ? S : never;
 }
+
+export namespace Agent {
+    export function initialize<TState, TCtx>(agent: Agent<TState, TCtx>): TState {
+        return call(agent, undefined, { type: Math.random().toString(36).substring(2) }, noop);
+    }
+
+    export function call<TState, TCtx, TMsg extends Msg>(
+        agent: Agent<TState, TCtx, TMsg>,
+        state: TState | undefined,
+        msg: TMsg,
+        push: TaskPush<TState, TCtx>,
+    ) {
+        let gen = agent(state, msg);
+        let next: ReturnType<typeof gen.next>;
+        while (!(next = gen.next()).done) {
+            push(next.value);
+        }
+        return next.value;
+    }
+
+    export type inferMsg<R> = R extends Agent<any, any, infer TMsg> ? TMsg : never;
+    export type inferCtx<R> = R extends Agent<any, infer TCtx, any> ? TCtx : never;
+    export type inferState<R> = R extends Agent<infer S, any, any> ? S : never;
+}
+
+/* ========================
+    creating
+   ======================== */
 
 type ControlOverlay<TState, TCtx> = (
     creator: ControlCreator<TState, TCtx>,
@@ -116,7 +148,7 @@ export function createControl<TState, TCtx = {}>(
 
 type createControlImpl = (final: () => Control<any, any>) => ControlCreator<any, any>;
 const createControlImpl: createControlImpl = (final) => (reducer, context) => {
-    type TState = Reducer.InferState<typeof reducer>;
+    type TState = Reducer.inferState<typeof reducer>;
     type TMsg = Msg;
     type TCtx = typeof context;
     type TSelf = Control<TState, TCtx>;
@@ -125,7 +157,7 @@ const createControlImpl: createControlImpl = (final) => (reducer, context) => {
     let lastMsg: TMsg;
     let nextMsg: PromiseWithResolvers<TMsg> = Promise.withResolvers();
 
-    const listeners = new Map<ListenerCallback, Listener>();
+    const listeners = new Map<Callback, { notify: Callback; cleanups: Array<Callback> }>();
 
     const activeControl: TSelf = {
         context,
@@ -133,8 +165,7 @@ const createControlImpl: createControlImpl = (final) => (reducer, context) => {
             return state;
         },
 
-        dispatch(token, ...args) {
-            let msg = token.init(...args);
+        dispatch(msg) {
             if (msg == null) {
                 return;
             }
@@ -153,9 +184,9 @@ const createControlImpl: createControlImpl = (final) => (reducer, context) => {
             const self = final();
             const errs: unknown[] = [];
             // biome-ignore format:
-            for (const {notify} of listeners.values()) try { notify() } catch (e) { errs.push(e) }
+            for (const [_, l] of listeners) try { l.notify() } catch (e) { errs.push(e) }
             // biome-ignore format:
-            for (const task of tasks) try { self.execute(task) } catch (e) { errs.push(e) }
+            for (const t of tasks) try { self.execute(t) } catch (e) { errs.push(e) }
             if (errs.length) {
                 self.catch(...errs);
             }
@@ -233,7 +264,7 @@ export function createTaskControl<TState, TCtx>(
 ): TaskControl<TState, TCtx> {
     return { ...base, subscribe, signal };
 
-    function subscribe(listener: ListenerCallback = noop): MsgStream<TState> {
+    function subscribe(listener: Callback = noop): MsgStream<TState> {
         {
             const sub = base.subscribe(listener);
             var unsubscribe = () => sub();
@@ -279,7 +310,6 @@ export function createTaskControl<TState, TCtx>(
                     }
                 }
             },
-            [Symbol.dispose]: unsubscribe,
             [Symbol.asyncIterator]: (): AsyncIterator<Msg> => ({
                 next: async () => {
                     try {
