@@ -1,5 +1,5 @@
 import { sortToString } from "../tools/objects";
-import { TaskPush, Task, TaskControl, Msg, MsgWith } from "./definition";
+import { Cmd, Task, TaskControl, Msg, MsgWith } from "../core/definition";
 
 enum LoadProgress {
     Started = 0,
@@ -113,24 +113,30 @@ function createUplinkImpl<TVal, TIn, TOut = TVal>(setup: UplinkSetup<TVal, TIn, 
         TODO();
     }
 
-    function observe(input: TIn) {
+    function createObserver(input: TIn) {
         let key = inputToKey({ input });
         return (ctl: TTaskCtl) => {
-            observersCount.increment(ctl.context, key);
-        };
-    }
-
-    function unobserve(input: TIn) {
-        let key = inputToKey({ input });
-        return async (ctl: TTaskCtl) => {
-            observersCount.decrement(ctl.context, key);
+            // cache this
+            return {
+                mountsCount: 0,
+                mount() {
+                    if (++this.mountsCount === 1) {
+                        ctl.dispatch({ type: "mount" });
+                    }
+                },
+                unmount() {
+                    if (--this.mountsCount === 0) {
+                        ctl.dispatch({ type: "unmount" });
+                    }
+                },
+            };
         };
     }
 
     function reduceUplink(
         state: TUplinkState | null = null,
         msg: Msg,
-        out: TaskPush<TVal>,
+        out: Cmd<TVal>,
     ): TUplinkState | null {
         if (resourceIsObserved(msg)) {
             let key = inputToKey(msg.payload);

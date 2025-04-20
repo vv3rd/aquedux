@@ -8,7 +8,10 @@ import {
     ErrFallbackEl,
     silenceExpectedConsoleError,
 } from "./help";
-import { createControl } from "../packages/core/definition";
+import { createControl, Msg, MsgWith, Cmd } from "../packages/core/definition";
+import { combineReducers } from "../packages/core/reducers";
+import { Reducer } from "../packages/core/definition";
+import { ObjectHTMLAttributes } from "react";
 
 silenceExpectedConsoleError();
 
@@ -32,8 +35,26 @@ test("catches", async () => {
     expect(screen.getByTestId(ErrFallbackEl)).toBeInTheDocument();
 });
 
-const reducer = (model = 0, msg: { type: "inc" } | { type: "dec" }) => {
-    return model;
-};
+const foldCount = Reducer.define<number, Msg<"inc"> | Msg<"dec">, { target: EventTarget }>(
+    (model = 0, msg) => {
+        return model;
+    },
+);
 
-const ctl = createControl(reducer);
+type TodoMsg = Msg.Family<{
+    add: object;
+    check: void;
+}>;
+
+const foldTodo = Reducer.define<object[], TodoMsg, { http: typeof fetch }>(
+    (model = [], msg, push) => {
+        return model;
+    },
+);
+
+const combi = combineReducers({
+    count: foldCount,
+    todos: foldTodo,
+});
+
+const ctl = createControl(foldCount);

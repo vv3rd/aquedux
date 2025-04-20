@@ -2,18 +2,28 @@ import { asEntries } from "../tools/objects";
 import * as Msgs from "./messages";
 import { isPlainObject } from "../tools/objects";
 import { Fn } from "../tools/functions";
-import { TaskPush, Reducer, MsgWith, Msg } from "./definition";
-import { createScopedPush } from "./scoping";
+import { Cmd, Reducer, MsgWith, Msg } from "./definition";
+import { createScopedCmd } from "./scoping";
 
 type combineReducers = <
     T extends {
-        [key in string]: Reducer<any, any>;
+        [key in string]: Reducer<any, any, any>;
     },
 >(
     reducersObject: T,
-) => Reducer<{
-    [K in keyof T]: T[K] extends Reducer<infer TState> ? TState : never;
-}>;
+) => Reducer<
+    {
+        [K in keyof T]: Reducer.inferState<T[K]>;
+    },
+    {
+        [K in keyof T]: Reducer.inferMsg<T[K]>;
+    }[keyof T],
+    {
+        [K in keyof T]: (_: Reducer.inferCtx<T[K]>) => void;
+    }[keyof T] extends (_: infer C) => any
+        ? { [K in keyof C]: C[K] }
+        : never
+>;
 
 export const combineReducers: combineReducers = (reducersObject) => {
     const reducers = asEntries(reducersObject);
@@ -21,7 +31,7 @@ export const combineReducers: combineReducers = (reducersObject) => {
     return function combination(current, action, command) {
         let next = current!;
         for (let [key, reducer] of reducers) {
-            const scopedCommand = createScopedPush(command, (s) => s[key]);
+            const scopedCommand = createScopedCmd(command, (s) => s[key]);
             const stateWas = current?.[key];
             const stateNow = reducer(stateWas, action, scopedCommand);
             if (stateWas !== stateNow) {
@@ -100,5 +110,5 @@ interface Accessor<T> {
     (): T;
     (Accessor_state: T | Partial<T>): T;
     (Accessor_update: (state: T) => T | Partial<T>): T;
-    do: TaskPush<T>;
+    do: Cmd<T>;
 }

@@ -15,16 +15,10 @@ interface Dispatch {
 }
 
 export interface Reducer<TState, TMsg = Msg, TCtx = {}> {
-    (state: TState | undefined, msg: TMsg, push: TaskPush<TState, TCtx>): TState;
+    (state: TState | undefined, msg: TMsg, cmd: Cmd<TState, TCtx>): TState;
 }
 
-export interface Agent<TState, TCtx = {}, TMsg = Msg> {
-    (state: TState | undefined, msg: TMsg): AgentResult<TState, TCtx>;
-}
-
-export type AgentResult<TState, TCtx> = Generator<Task<void, TState, TCtx>, TState, void>;
-
-export interface TaskPush<TState, TCtx = {}> {
+export interface Cmd<TState, TCtx = {}> {
     (task: Task<void, TState, TCtx>): void;
 }
 
@@ -74,6 +68,9 @@ export namespace Msg {
     export interface Matcher<TMsg extends Msg> {
         match: (message: Msg) => message is TMsg;
     }
+    export type Family<T extends { [key: string]: any }> = {
+        [K in keyof T]: K extends string ? (T[K] extends void ? Msg<K> : MsgWith<T[K], K>) : never;
+    }[keyof T];
     export type inferPayload<M> = M extends MsgWith<infer P> ? P : void;
 }
 
@@ -83,37 +80,20 @@ export namespace Control {
 }
 
 export namespace Reducer {
-    export function initialize<TState>(reducer: Reducer<TState>): TState {
-        return reducer(undefined, { type: Math.random().toString(36).substring(2) }, noop);
+    export function define<TState, TMsg extends Msg<any> = Msg, TCtx = {}>(
+        reducer: Reducer<TState, TMsg, TCtx>,
+    ) {
+        return reducer;
+    }
+
+    export function initialize<TState>(reducer: Reducer<TState, any, any>): TState {
+        let rtrn = reducer(undefined, { type: Math.random().toString(36).substring(2) }, noop);
+        return rtrn;
     }
 
     export type inferMsg<R> = R extends Reducer<any, infer TMsg, any> ? TMsg : never;
     export type inferCtx<R> = R extends Reducer<any, any, infer TCtx> ? TCtx : never;
-    export type inferState<R> = R extends Reducer<infer S> ? S : never;
-}
-
-export namespace Agent {
-    export function initialize<TState, TCtx>(agent: Agent<TState, TCtx>): TState {
-        return call(agent, undefined, { type: Math.random().toString(36).substring(2) }, noop);
-    }
-
-    export function call<TState, TCtx, TMsg extends Msg>(
-        agent: Agent<TState, TCtx, TMsg>,
-        state: TState | undefined,
-        msg: TMsg,
-        push: TaskPush<TState, TCtx>,
-    ) {
-        let gen = agent(state, msg);
-        let next: ReturnType<typeof gen.next>;
-        while (!(next = gen.next()).done) {
-            push(next.value);
-        }
-        return next.value;
-    }
-
-    export type inferMsg<R> = R extends Agent<any, any, infer TMsg> ? TMsg : never;
-    export type inferCtx<R> = R extends Agent<any, infer TCtx, any> ? TCtx : never;
-    export type inferState<R> = R extends Agent<infer S, any, any> ? S : never;
+    export type inferState<R> = R extends Reducer<infer S, any, any> ? S : never;
 }
 
 /* ========================

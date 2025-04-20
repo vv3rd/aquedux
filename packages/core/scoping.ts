@@ -1,4 +1,4 @@
-import { TaskPush, Control, createTaskControl, Task } from "./definition";
+import { Cmd, Control, createTaskControl, Task } from "./definition";
 
 type createScopedControl = <TStateA, TStateB, TCtx>(
     base: Control<TStateA, TCtx>,
@@ -17,12 +17,12 @@ export const createScopedControl: createScopedControl = (base, selector) => {
     };
 };
 
-type createScopedPush = <TStateA, TStateB, TCtx>(
-    command: TaskPush<TStateA, TCtx>,
+type createScopedCmd = <TStateA, TStateB, TCtx>(
+    command: Cmd<TStateA, TCtx>,
     selector: (state: TStateA) => TStateB,
-) => TaskPush<TStateB, TCtx>;
+) => Cmd<TStateB, TCtx>;
 
-export const createScopedPush: createScopedPush = (command, selector) => {
+export const createScopedCmd: createScopedCmd = (command, selector) => {
     return (task) => {
         command(createScopedTask(task, selector));
     };

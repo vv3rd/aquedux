@@ -111,4 +111,4 @@ const FUCK_STUB_USED = "TaskControl on wire probe message is a stub and cannot b
 const FUCK_NOT_WIRED = "";
 const FUCK_PROBE_MISUSED =
     "This should not happen unless you doing something " +
-    "very wrong with scoping TaskPush or TaskControls-s";
+    "very wrong with scoping Cmd or TaskControls-s";
