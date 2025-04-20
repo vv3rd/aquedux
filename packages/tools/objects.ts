@@ -3,6 +3,8 @@ import type { primitive } from "./ts";
 
 const { prototype, getPrototypeOf, entries, fromEntries } = Object;
 
+export const {freeze} = Object
+
 export const asEntries = entries as <T>(object: T) => [keyof T, T[keyof T]][];
 
 export function reimplement<T extends object, U>(

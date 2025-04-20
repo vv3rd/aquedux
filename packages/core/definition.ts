@@ -1,5 +1,5 @@
 import { Pretty } from "../tools/ts";
-import { Immutable } from "../tools/objects";
+import { freeze, Immutable } from "../tools/objects";
 import { safe, same, noop, Is, Callback } from "../tools/functions";
 
 export interface Msg<T extends Msg.Type = Msg.Type> {
@@ -74,7 +74,7 @@ export namespace Msg {
     export interface Matcher<TMsg extends Msg> {
         match: (message: Msg) => message is TMsg;
     }
-    export type inferPayload<M> = M extends MsgWith<infer P> ? P : void
+    export type inferPayload<M> = M extends MsgWith<infer P> ? P : void;
 }
 
 export namespace Control {
@@ -172,10 +172,10 @@ const createControlImpl: createControlImpl = (final) => (reducer, context) => {
             let tasks: Task<void, TState, TCtx>[] = [];
             try {
                 delegate = lockedControl;
-                state = reducer(state, msg, (cmd) => tasks.push(cmd));
+                state = reducer(state, msg, (t) => tasks.push(t));
             } finally {
                 delegate = activeControl;
-                tasks = [...tasks];
+                freeze(tasks);
             }
             lastMsg = msg;
             nextMsg.resolve(msg);

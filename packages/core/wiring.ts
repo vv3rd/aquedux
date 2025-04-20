@@ -1,15 +1,18 @@
 import { panic } from "../tools/errors";
-import { Fn } from "../tools/functions";
+import type { Fn } from "../tools/functions";
+import { freeze } from "../tools/objects";
 import type { Reducer, Task, Msg } from "./definition";
 
-export namespace Wire {}
-
-const probeMsgType = Math.random().toString(36).substring(2);
-const probeMsg = (setterTask: (wireId: string) => Task<void, unknown, unknown>) => ({
-    type: probeMsgType,
-    wiringSetter: setterTask,
-});
-probeMsg.match = (msg: Msg): msg is ReturnType<typeof probeMsg> => msg.type === probeMsgType;
+function probeMsg(setterTask: (wireId: string) => Task<void, unknown, unknown>) {
+    return {
+        type: probeMsg.type,
+        wiringSetter: setterTask,
+    };
+}
+probeMsg.type = Math.random().toString(36).substring(2);
+probeMsg.match = (msg: Msg): msg is ReturnType<typeof probeMsg> => {
+    return msg.type === probeMsg.type;
+};
 
 const wiringKey = "~~INTERNAL_WIRING";
 export interface WiringRoot {
@@ -18,11 +21,13 @@ export interface WiringRoot {
     };
 }
 
-export interface WiredReducer<TState> extends Reducer<TState> {
+export interface Wire<TState> {
     selectOwnState: (root: WiringRoot) => TState;
 }
 
-export function makeWire<TState>(reducer: Reducer<TState>): WiredReducer<TState> {
+export interface WiredReducer<TState> extends Reducer<TState>, Wire<TState> {}
+
+export function withWiring<TState>(reducer: Reducer<TState>): WiredReducer<TState> {
     const wireId = Math.random().toString(36).substring(2);
     const wiredReducer: WiredReducer<TState> = (state, msg, out) => {
         if (probeMsg.match(msg)) {
@@ -31,7 +36,7 @@ export function makeWire<TState>(reducer: Reducer<TState>): WiredReducer<TState>
         return reducer(state, msg, out);
     };
 
-    wiredReducer.selectOwnState = (root: WiringRoot) => {
+    wiredReducer.selectOwnState = (root) => {
         const output = root[wiringKey]?.[wireId]?.(root);
         if (output === undefined) {
             throw new Error(FUCK_NOT_WIRED);
@@ -39,6 +44,7 @@ export function makeWire<TState>(reducer: Reducer<TState>): WiredReducer<TState>
             return output as TState;
         }
     };
+
     return wiredReducer;
 }
 
@@ -53,11 +59,11 @@ export function makeWiringRoot<TState extends object, TMsg extends Msg, TCtx>(
         wireMeta[wireId] = makeWireSelector(api.getState);
     });
 
-    let tasks: TTask[] = [];
+    let tasks: TTask[] | TTask = [];
     try {
-        reducer(undefined, probe as any, (cmd) => tasks.push(cmd));
+        reducer(undefined, probe as any, (t) => tasks.push(t));
     } finally {
-        tasks = [...tasks];
+        freeze(tasks);
     }
 
     const stubTaskControl = new Proxy({} as Fn.Arg<TTask>, {
@@ -75,10 +81,7 @@ export function makeWiringRoot<TState extends object, TMsg extends Msg, TCtx>(
     }
 
     let stateGetter = function lockedStateGetter(): TStateWithWires {
-        throw new Error(
-            "This should not happen unless you doing something " +
-                "very wrong with scoping Yielder-s or TaskControls-s",
-        );
+        throw new Error(FUCK_PROBE_MISUSED);
     };
 
     function makeWireSelector(getState: () => unknown) {
@@ -106,3 +109,6 @@ export function makeWiringRoot<TState extends object, TMsg extends Msg, TCtx>(
 
 const FUCK_STUB_USED = "TaskControl on wire probe message is a stub and cannot be used";
 const FUCK_NOT_WIRED = "";
+const FUCK_PROBE_MISUSED =
+    "This should not happen unless you doing something " +
+    "very wrong with scoping TaskPush or TaskControls-s";
