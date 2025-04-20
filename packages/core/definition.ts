@@ -68,10 +68,15 @@ export namespace Msg {
     export interface Matcher<TMsg extends Msg> {
         match: (message: Msg) => message is TMsg;
     }
+
+    export type inferPayload<TMsg extends Msg> = TMsg extends MsgWith<infer P> ? P : void;
+    export type inferMatch<TMatcher extends Matcher<any>> = TMatcher extends Matcher<infer T>
+        ? T
+        : never;
+
     export type Family<T extends { [key: string]: any }> = {
         [K in keyof T]: K extends string ? (T[K] extends void ? Msg<K> : MsgWith<T[K], K>) : never;
     }[keyof T];
-    export type inferPayload<M> = M extends MsgWith<infer P> ? P : void;
 }
 
 export namespace Control {

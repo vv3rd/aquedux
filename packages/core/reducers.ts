@@ -1,9 +1,9 @@
 import { asEntries } from "../tools/objects";
-import * as Msgs from "./messages";
 import { isPlainObject } from "../tools/objects";
 import { Fn } from "../tools/functions";
 import { Cmd, Reducer, MsgWith, Msg } from "./definition";
 import { createScopedCmd } from "./scoping";
+import { defineMsg, TypedMsgFactory } from "./messages";
 
 type combineReducers = <
     T extends {
@@ -54,7 +54,7 @@ export function createClass<
 >(reducerName: N, initialState: T, updaters: R & ThisType<Accessor<T>>) {
     type Addressed<K extends string> = `${N}/${K}`;
     type TMsgs = {
-        [K in keyof R & string]: Msgs.TypedFactory<
+        [K in keyof R & string]: TypedMsgFactory<
             Fn.Like<R[K], { returns: MsgWith<Parameters<R[K]>, Addressed<K>> }>
         >;
     };
@@ -62,7 +62,7 @@ export function createClass<
 
     const keys = Object.keys(updaters);
     const messages = Object.fromEntries(
-        keys.map((key) => [key, Msgs.define(`${reducerName}/${key}`).with<any[]>()]),
+        keys.map((key) => [key, defineMsg(`${reducerName}/${key}`).with<any[]>()]),
     ) as unknown as TMsgs;
 
     const isMatchingMsg = (msg: Msg): msg is TMsg =>
