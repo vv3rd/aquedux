@@ -10,7 +10,7 @@ export interface MsgWith<P, T extends Msg.Type = Msg.Type> extends Msg<T> {
     payload: P;
 }
 
-interface Dispatch {
+export interface Dispatch {
     (message: Msg): void;
 }
 

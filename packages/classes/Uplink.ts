@@ -1,5 +1,6 @@
 import { sortToString } from "../tools/objects";
 import { Cmd, Task, TaskControl, Msg, MsgWith } from "../core/definition";
+import { todo } from "../tools/errors";
 
 enum LoadProgress {
     Started = 0,
@@ -51,15 +52,10 @@ function createMeta(): UplinkMeta {
     };
 }
 
-interface UplinkCacheLifetime<TVal> {
+interface UplinkCacheLifetime<TVal, TIn> {
     shouldInvalidate: (instance: Uplink<TVal>, msg: Msg) => boolean;
-    shouldDiscard: (instance: Uplink<TVal>, msg: Msg) => boolean;
-    shouldSet: (instance: Uplink<TVal>, msg: Msg) => msg is MsgWith<TVal>;
-    untilGarbage: number;
-    untilStale: number;
-    // maybe instead do something like
-    // shouldEvict: (instaces: Uplink<TVal> & UplinkMeta) => string[]
-    // scheduleEvictionCheck: (idk) => Task
+    shouldUpdate: (instance: Uplink<TVal>, msg: Msg) => msg is MsgWith<TVal>;
+    evictKeys: (entries: Array<{ cache: Uplink<TVal>; input: TIn; key: string }>) => string[];
 }
 
 interface UplinkValueStructure<TVal, TIn> {
@@ -73,7 +69,7 @@ interface UplinkSetup<TVal, TIn, TOut = TVal> {
     // will then allow me to have `measure` func in CacheLifetime to get the size of the object
     // from Content-Length. When TOut is something other than Request, other measuring methods can be used
     fetch: (input: TIn) => UplinkFetchTask<TOut>;
-    lifetime: UplinkCacheLifetime<TVal>;
+    lifetime: UplinkCacheLifetime<TVal, TIn>;
     structure: UplinkValueStructure<TVal, TIn>;
 }
 
@@ -102,19 +98,19 @@ function createUplinkImpl<TVal, TIn, TOut = TVal>(setup: UplinkSetup<TVal, TIn, 
     }
 
     function resourceIsObserved(_msg: Msg): _msg is MsgWith<{ input: TIn; initialValue?: TVal }> {
-        TODO();
+        todo();
     }
 
     function resourceIsUnobserved(_msg: Msg): boolean {
-        TODO();
+        todo();
     }
 
     function instanceIsStale(_instance: TUplink): boolean {
-        TODO();
+        todo();
     }
 
     function createObserver(input: TIn) {
-        let key = inputToKey({ input });
+        let key = createKey({ input });
         return (ctl: TTaskCtl) => {
             // cache this
             return {
@@ -139,7 +135,7 @@ function createUplinkImpl<TVal, TIn, TOut = TVal>(setup: UplinkSetup<TVal, TIn, 
         out: Cmd<TVal>,
     ): TUplinkState | null {
         if (resourceIsObserved(msg)) {
-            let key = inputToKey(msg.payload);
+            let key = createKey(msg.payload);
             let instance = state && state.results[key];
             if (instance == null) {
                 instance = createStarted();
@@ -161,7 +157,7 @@ function createUplinkImpl<TVal, TIn, TOut = TVal>(setup: UplinkSetup<TVal, TIn, 
     }
 }
 
-function inputToKey({ input }: { input: unknown }) {
+function createKey({ input }: { input: unknown }) {
     if (input == null) {
         return "-";
     }
@@ -174,38 +170,3 @@ TODO: consider
 2. need for manual writes to the cache and what to do with pending requests if a write occurs
 
 */
-
-function TODO(): never {
-    throw new Error("TODO");
-}
-
-/**
- * @deprecated
- * it's better to not use this at all, just update cache when new entries are added or special GC msg is dispatched
- */
-const observersCount = new (class ObserversCount {
-    #maps = new WeakMap<{}, Map<string, number>>();
-    increment(scopeKey: {}, inputHash: string) {
-        let countMap = this.#maps.get(scopeKey);
-        if (countMap == null) {
-            countMap = new Map();
-            this.#maps.set(scopeKey, countMap);
-        }
-        let count = (countMap.get(inputHash) ?? 0) + 1;
-        countMap.set(inputHash, count);
-        return count;
-    }
-    decrement(scopeKey: {}, inputHash: string) {
-        let countMap = this.#maps.get(scopeKey);
-        if (countMap == null) {
-            return 0;
-        }
-        let count = countMap.get(inputHash) ?? 0;
-        if (count <= 0) {
-            return 0;
-        }
-        count -= 1;
-        countMap.set(inputHash, count);
-        return count;
-    }
-})();

@@ -1,7 +1,7 @@
 import { Fn, same } from "../tools/functions";
-import { Msg, MsgWith } from "./definition";
+import { Dispatch, Msg, MsgWith } from "./definition";
 
-export function typedMsgFactory<T extends string, F extends MsgFactoryFn<any[], T>>(
+export function typedMsgFactory<T extends string, F extends MsgFactory<Msg<T>>>(
     type: T,
     factoryFn: F,
 ) {
@@ -16,25 +16,15 @@ export function matchByType<TMsg extends Msg = Msg>(type: string) {
     return (ac: Msg): ac is TMsg => ac.type === type;
 }
 
-type AnyMsgFactoryFn = MsgFactoryFn<any[], Msg.Type>;
-type MsgFactoryFn<I extends any[], T extends Msg.Type, TMsg extends Msg<T> = Msg<T>> = (
-    this: { type: T },
-    ...inputs: I
-) => TMsg;
+export interface MsgFactory<TMsg extends Msg = Msg<any>, I extends any[] = []> {
+    (...inputs: I): TMsg;
+}
 
-export type AnyTypedMsgFactory = TypedMsgFactory<AnyMsgFactoryFn>;
-export type TypedMsgFactory<F extends MsgFactoryFn<any[], any>> = Msg.Matcher<ReturnType<F>> & {
+export type TypedMsgFactory<F extends MsgFactory> = {
     type: ReturnType<F>["type"];
     T: ReturnType<F>;
-} & F;
-
-export type SimpleMsgFactory<T extends Msg.Type, P = void> = Msg.Matcher<{
-    type: T;
-    payload: P;
-}> & {
-    (payload: P): { type: T; payload: P };
-    type: T;
-};
+} & Msg.Matcher<ReturnType<F>> &
+    F;
 
 function construct<T extends Msg.Type, P>(type: T, payload: P): MsgWith<P, T>;
 function construct<T extends Msg.Type>(type: T): Msg<T>;
@@ -75,4 +65,39 @@ export function defineMsgFamily<S extends string, A extends readonly { 0: string
             [K in A[number][0]]: Extract<A[number], { 0: K }>[1];
         };
     };
+}
+
+type MsgFactoriesObj = { [key in string]: MsgFactory<Msg<any>, any[]> };
+
+export function bindMsgFactories<T extends MsgFactoriesObj>(
+    factories: T,
+): (dispatch: Dispatch) => Dispatch & T;
+export function bindMsgFactories(
+    dispatch: Dispatch,
+): <T extends MsgFactoriesObj>(msgs: T) => Dispatch & T;
+export function bindMsgFactories(dispatchOrFactories: Dispatch | MsgFactoriesObj) {
+    if (typeof dispatchOrFactories === "function") {
+        const dispatch = dispatchOrFactories;
+        return (factories: MsgFactoriesObj) => impl(dispatch, factories);
+    } else {
+        const factories = dispatchOrFactories;
+        return (dispatch: Dispatch) => impl(dispatch, factories);
+    }
+
+    function impl(dispatch: Dispatch, factories: MsgFactoriesObj) {
+        const dispatchClone = dispatch.bind(null);
+        return Object.assign(
+            dispatchClone,
+            Object.fromEntries(
+                Object.entries(factories).map(([key, val]) => [
+                    key,
+                    (...args: any[]) => {
+                        const msg = val(...args);
+                        dispatch(msg);
+                        return msg;
+                    },
+                ]),
+            ),
+        );
+    }
 }

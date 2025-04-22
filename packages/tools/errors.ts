@@ -12,6 +12,11 @@ export function assert(condition: boolean, message = "Assertion failed"): assert
         throw new Err(message).popStackLine();
     }
 }
+
+export function todo(): never {
+    throw new Err("TODO").popStackLine()
+}
+
 class Err extends Error {
     popStackLine() {
         const error = this;
