@@ -5,6 +5,10 @@ import { Cmd, Reducer, MsgWith, Msg } from "./definition";
 import { createScopedCmd } from "./scoping";
 import { defineMsg, TypedMsgFactory } from "./messages";
 
+export function getInitialState<TState>(reducer: Reducer<TState, any, any>): TState {
+    return Reducer.initialize(reducer);
+}
+
 type combineReducers = <
     T extends {
         [key in string]: Reducer<any, any, any>;

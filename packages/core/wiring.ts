@@ -1,7 +1,8 @@
 import { panic } from "../tools/errors";
 import type { Fn } from "../tools/functions";
-import { freeze } from "../tools/objects";
-import type { Reducer, Task, Msg } from "./definition";
+import { freeze, sortToString } from "../tools/objects";
+import { Reducer, Task, Msg, TaskControl } from "./definition";
+import { getInitialState } from "./reducers";
 
 function probeMsg(setterTask: (wireId: string) => Task<void, unknown, unknown>) {
     return {
@@ -112,3 +113,84 @@ const FUCK_NOT_WIRED = "";
 const FUCK_PROBE_MISUSED =
     "This should not happen unless you doing something " +
     "very wrong with scoping Cmd or TaskControls-s";
+
+function createWireRegistry() {
+    return {
+        createWire: <TState, TMsg extends Msg, TCtx = {}>(
+            reducer: Reducer<TState, TMsg, TCtx>,
+        ) => {},
+    };
+}
+
+interface WiresContainer {
+    [wireKey: `${string}(${string})`]: {
+        value: unknown;
+        createdBy: Msg<any>
+    };
+}
+
+export function createWire<TState, TMsg extends Msg, TCtx = {}, TParams = void>(
+    this: {
+        registry: Map<string, Reducer.Any>;
+        selectContainer: (upperState: WiringRoot) => WiresContainer;
+    },
+    name: string,
+    reducerFactory: (params: TParams) => Reducer<TState, TMsg, TCtx>,
+) {
+    const { registry, selectContainer } = this;
+    registry.set(name, reducerFactory);
+
+    const createKey = (params: TParams, name: string) => {
+        let key = sortToString(params);
+        if (key === undefined) {
+            key = "";
+        }
+        return `${name}(${key})` as const;
+    };
+
+    const existingHandles = new WeakMap();
+
+    function selectWireHandle(params: TParams) {
+        type THandle = {
+            selectOwnState: (root: WiringRoot) => TState;
+            require: (ctl: TaskControl<unknown, unknown>) => void;
+            abandon: (ctl: TaskControl<unknown, unknown>) => void;
+        };
+
+        let reducer = reducerFactory(params);
+
+        let handle: THandle;
+
+        return (root: WiringRoot): THandle => {
+            let key = createKey(params, name);
+            let container = selectContainer(root);
+            if (key in container && handle) {
+                return handle;
+            }
+            let initialValue: TState;
+            let outletsCount = 0;
+            return (handle = {
+                selectOwnState(root) {
+                    let value = selectContainer(root)[key]?.value;
+                    if (value === undefined) {
+                        if (initialValue === undefined) {
+                            initialValue = getInitialState(reducer);
+                        }
+                        value = initialValue;
+                    }
+                    return value;
+                },
+                require(ctl) {
+                    if (++outletsCount === 1) {
+                    }
+                },
+                abandon(ctl) {
+                    if (--outletsCount === 0) {
+                    }
+                },
+            } as THandle);
+        };
+    }
+
+    return reducerFactory;
+}

@@ -1,15 +1,13 @@
 import { Fn, same } from "../tools/functions";
 import { Dispatch, Msg, MsgWith } from "./definition";
 
-export function typedMsgFactory<T extends string, F extends MsgFactory<Msg<T>>>(
-    type: T,
-    factoryFn: F,
-) {
-    type R = TypedMsgFactory<F>;
-    return Object.assign(factoryFn.bind({ type }), factoryFn, {
-        match: matchByType<ReturnType<typeof factoryFn>>(type),
+function typedMsgFactory<T extends string, F extends MsgFactory<Msg<T>>>(type: T, factoryFn: F) {
+    type TMsg = ReturnType<typeof factoryFn>;
+
+    return Object.assign(factoryFn, {
+        match: matchByType<TMsg>(type),
         type,
-    }) as R;
+    }) as TypedMsgFactory<F>;
 }
 
 export function matchByType<TMsg extends Msg = Msg>(type: string) {
@@ -34,35 +32,34 @@ function construct<T extends Msg.Type, P>(type: T, payload?: P) {
 }
 
 export function defineMsg<T extends string>(type: T) {
-    const builders = {
-        with: <P, A extends unknown[] = [payload: P]>(prepare: Fn<A, P> = same as any) =>
-            typedMsgFactory(type, (...a: A) => construct(type, prepare(...a))),
-    };
     return Object.assign(
         typedMsgFactory(type, () => construct(type)),
-        builders,
+        {
+            with<P, A extends unknown[] = [payload: P]>(prepare: Fn<A, P> = same as any) {
+                return typedMsgFactory(type, (...a: A) => construct(type, prepare(...a)));
+            },
+        },
     );
 }
 
-export function defineMsgFamily<S extends string, A extends readonly { 0: string; 1: any }[]>(
-    familyName: S,
-) {
-    const builder = <T extends string>(type: T) => {
-        const fullType = `${familyName}/${type}` as const;
-        return {
-            0: type,
-            1: typedMsgFactory(fullType, () => construct(fullType)),
-            with: <P, A extends any[] = [payload: P]>(prepare: Fn<A, P> = same as any) => ({
-                0: type,
-                1: typedMsgFactory(fullType, (...a: A) => construct(fullType, prepare(...a))),
-            }),
-        };
-    };
-    return (buildFunc: (b: typeof builder) => A) => {
-        const messages = buildFunc(builder);
-        const result = Object.fromEntries(messages.map((entry) => [entry[0], entry[1]]));
-        return result as {
-            [K in A[number][0]]: Extract<A[number], { 0: K }>[1];
+export function defineMsgGroup<S extends string>(groupName: S) {
+    return <T extends Record<string, any>>() => {
+        const real: Record<string, unknown> = {};
+
+        return new Proxy(real, {
+            get(target, prop: string) {
+                if (!(prop in target)) {
+                    Object.defineProperty(real, prop, {
+                        value: defineMsg(`${groupName}/${prop}`).with<unknown>(),
+                        configurable: false,
+                        enumerable: false,
+                        writable: false,
+                    });
+                }
+                return real[prop];
+            },
+        }) as {
+            [K in Extract<keyof T, string>]: (payload: T[K]) => MsgWith<T[K], `${S}/${K}`>;
         };
     };
 }

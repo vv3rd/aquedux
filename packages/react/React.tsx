@@ -34,7 +34,11 @@ function useControl() {
 export function useSelector<T>(selector: (state: any) => T) {
     const ctl = useControl();
     const snapshot = useCallback(() => selector(ctl.getState()), [ctl, selector]);
-    const value = useSyncExternalStore(ctl.subscribe, snapshot, snapshot);
+    const value = useSyncExternalStore(
+        useCallback((cb) => ctl.subscribe(cb).unsubscribe, [ctl]),
+        snapshot,
+        snapshot,
+    );
     return value;
 }
 
@@ -67,45 +71,60 @@ export function useTracedSelector<
         );
     }
 
-    const deps = [selector, ...args];
-    const memoized = useMemo(() => {
-        let cache: null | {
-            value: TSelected;
-            state: TState;
-            keys: Set<keyof TState>;
-        } = null;
-
-        return (state: TState) => {
-            whenHasCache: if (cache) {
-                for (const key of cache.keys) {
-                    if (state[key] !== cache.state[key]) {
-                        break whenHasCache;
-                    }
-                }
-                return cache.value;
-            }
-
-            const keys = new Set<keyof TState>();
-            const tracedState = new Proxy(state, {
-                get(_, p) {
-                    const key = p as keyof TState;
-                    const val = state[key];
-                    if (keys.has(key) === false) {
-                        keys.add(key);
-                    }
-                    return val;
-                },
-            });
-
-            const value = selector(tracedState, ...args);
-            {
-                cache = { state, value, keys };
-            }
-            return value;
-        };
-    }, deps);
+    const memoized = useMemo(() => craeteTracedSelector(selector, args), [selector, ...args]);
+    useDebugValue(memoized, debugTracedSelector);
 
     const value = useSelector(memoized);
-    useDebugValue(value);
     return value;
+}
+
+function debugTracedSelector(m: ReturnType<typeof craeteTracedSelector<any, any>>) {
+    const cache = m.geCache();
+    return cache && [cache.value, Object.keys(cache.keys)];
+}
+
+function craeteTracedSelector<TArgs extends any[], TState extends object = {}, TSelected = unknown>(
+    selector: (state: TState, ...args: TArgs) => TSelected,
+    args: TArgs,
+) {
+    type TKeys = Record<string, keyof TState>;
+
+    let cache: null | {
+        value: TSelected;
+        state: TState;
+        keys: TKeys;
+    } = null;
+
+    const tracedSelctor = (state: TState) => {
+        whenHasCache: if (cache) {
+            for (const key of Object.values(cache.keys)) {
+                if (state[key] !== cache.state[key]) {
+                    break whenHasCache;
+                }
+            }
+            return cache.value;
+        }
+
+        const keys: TKeys = {};
+        const tracedState = new Proxy(state, {
+            get(target, prop: string) {
+                const key = (keys[prop] = prop as keyof TState);
+                const val = target[key];
+                return val;
+            },
+        });
+
+        cache = {
+            value: selector(tracedState, ...args),
+            state,
+            keys,
+        };
+        return cache.value;
+    };
+
+    tracedSelctor.geCache = () => {
+        return cache;
+    };
+
+    return tracedSelctor;
 }

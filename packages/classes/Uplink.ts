@@ -1,6 +1,8 @@
 import { sortToString } from "../tools/objects";
 import { Cmd, Task, TaskControl, Msg, MsgWith } from "../core/definition";
 import { todo } from "../tools/errors";
+import { memoOne } from "../tools/functions";
+import { defineMsgGroup } from "../core/messages";
 
 enum LoadProgress {
     Started = 0,
@@ -24,19 +26,19 @@ interface AbstractUplink<R> extends UplinkMeta {
     value: UplinkResultsForStatus<R>[this["progress"]]["value"];
     error: UplinkResultsForStatus<R>[this["progress"]]["error"];
 }
-interface StartedUplink<R> extends AbstractUplink<R> {
+interface UplinkStarted<R> extends AbstractUplink<R> {
     progress: LoadProgress.Started;
 }
-interface HasValueUplink<R> extends AbstractUplink<R> {
+interface UplinkWithValue<R> extends AbstractUplink<R> {
     progress: LoadProgress.GotValue;
 }
-interface HasErrorUplink<R> extends AbstractUplink<R> {
+interface UplinkWithError<R> extends AbstractUplink<R> {
     progress: LoadProgress.GotError;
 }
 
-export type Uplink<R> = StartedUplink<R> | HasErrorUplink<R> | HasValueUplink<R>;
+export type Uplink<R> = UplinkStarted<R> | UplinkWithError<R> | UplinkWithValue<R>;
 
-function createStarted<TVal>(): StartedUplink<TVal> {
+function createStarted<TVal>(): UplinkStarted<TVal> {
     return {
         value: undefined,
         error: undefined,
@@ -90,8 +92,16 @@ function createUplinkImpl<TVal, TIn, TOut = TVal>(setup: UplinkSetup<TVal, TIn, 
     type TUplinkState = UplinkState<TVal, TIn>;
     type TTaskCtl = TaskControl<TUplinkState>;
     type TUplink = Uplink<TVal>;
+    const { name: uplinkName, fetch: fetchValue } = setup;
 
-    // const { name: cacheName, fetch: fetchValue, lifetime, structure } = setup;
+    const theUplinkMessages = defineMsgGroup(uplinkName)<{
+        observed: { input: TIn };
+        unobserved: { key: string };
+        valueWrite: TVal;
+        stateWrite: Uplink<TVal>;
+        fetchSuccess: TOut;
+        fetchFailure: void | TVal;
+    }>();
 
     function createUplinkState(key: string, instance: TUplink): TUplinkState {
         return { results: { [key]: instance }, inputs: {} };
@@ -109,25 +119,26 @@ function createUplinkImpl<TVal, TIn, TOut = TVal>(setup: UplinkSetup<TVal, TIn, 
         todo();
     }
 
-    function createObserver(input: TIn) {
-        let key = createKey({ input });
-        return (ctl: TTaskCtl) => {
-            // cache this
-            return {
-                mountsCount: 0,
-                mount() {
-                    if (++this.mountsCount === 1) {
-                        ctl.dispatch({ type: "mount" });
-                    }
-                },
-                unmount() {
-                    if (--this.mountsCount === 0) {
-                        ctl.dispatch({ type: "unmount" });
-                    }
-                },
-            };
+    const compareInputs = (a: TIn, b: TIn): boolean =>
+        createKey({ input: a }) === createKey({ input: b });
+
+    // FIXME: this is not good enough, need to cache for multiple inputs
+    // in a weakmap
+    const createUplinkHandle = memoOne((input: TIn) => {
+        let mountsCount = 0;
+        return {
+            mount(ctl: TTaskCtl) {
+                if (++mountsCount === 1) {
+                    ctl.dispatch({ type: "mount", payload: { input } });
+                }
+            },
+            unmount(ctl: TTaskCtl) {
+                if (--mountsCount === 0) {
+                    ctl.dispatch({ type: "unmount" });
+                }
+            },
         };
-    }
+    }, compareInputs);
 
     function reduceUplink(
         state: TUplinkState | null = null,

@@ -25,9 +25,10 @@ export type Narrow<From, To extends From> = (input: From) => input is To;
 export const noop = () => {};
 export const same = <T>(thing: T): T => thing;
 
-export function memo<F extends (this: any, ...args: any[]) => any>(
+export function memoOne<F extends (this: any, ...args: any[]) => any>(
     fn: F,
-    isEqual = Object.is,
+    isEqual: (a: Fn.Args<F>[number], b: Fn.Args<F>[number]) => boolean = Object.is,
+
     allEquals = (args1: Fn.Args<F>, args2: Fn.Args<F>): boolean => {
         if (args1.length !== args2.length) return false;
         for (let i = 0; i < args1.length; i++) if (!isEqual(args1[i], args2[i])) return false;

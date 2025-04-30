@@ -1,30 +1,31 @@
 export function panic(error: Error | string) {
     if (error instanceof Error) throw error;
-    else throw new Err(error).popStackLine();
+    else throw trimStack(new Error(error));
 }
 
 export function absurd<T extends never>(_: T): never {
-    throw new Err("Function `absurd` should never be called").popStackLine();
+    throw trimStack(new Error("Function `absurd` should never be called"));
 }
 
 export function assert(condition: boolean, message = "Assertion failed"): asserts condition {
     if (!condition) {
-        throw new Err(message).popStackLine();
+        throw trimStack(new Error(message));
     }
 }
 
 export function todo(): never {
-    throw new Err("TODO").popStackLine()
+    throw trimStack(new Error("TODO"));
 }
 
-class Err extends Error {
-    popStackLine() {
-        const error = this;
-        if (error.stack) {
-            let stack = error.stack.split("\n");
-            stack.splice(1, 1);
-            error.stack = stack.join("\n");
-        }
-        return this;
+function trimStack(err: Error) {
+    if (err.stack) {
+        const clone = new Error();
+        clone.name = err.name;
+        clone.message = err.message;
+        clone.cause = err.cause;
+        clone.stack = err.stack.split("\n").toSpliced(1, 1).join("\n");
+        Object.setPrototypeOf(clone, Object.getPrototypeOf(err));
+        err = clone;
     }
+    return err;
 }

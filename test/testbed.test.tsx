@@ -12,6 +12,7 @@ import { createControl, Msg, MsgWith, Cmd } from "../packages/core/definition";
 import { combineReducers } from "../packages/core/reducers";
 import { Reducer } from "../packages/core/definition";
 import { ObjectHTMLAttributes } from "react";
+import { createWire } from "../packages/core/wiring";
 
 silenceExpectedConsoleError();
 
@@ -34,27 +35,3 @@ test("catches", async () => {
     await act(() => render(<Boundry children={<Await the={error} />} />));
     expect(screen.getByTestId(ErrFallbackEl)).toBeInTheDocument();
 });
-
-const foldCount = Reducer.define<number, Msg<"inc"> | Msg<"dec">, { target: EventTarget }>(
-    (model = 0, msg) => {
-        return model;
-    },
-);
-
-type TodoMsg = Msg.Family<{
-    add: object;
-    check: void;
-}>;
-
-const foldTodo = Reducer.define<object[], TodoMsg, { http: typeof fetch }>(
-    (model = [], msg, push) => {
-        return model;
-    },
-);
-
-const combi = combineReducers({
-    count: foldCount,
-    todos: foldTodo,
-});
-
-const ctl = createControl(foldCount);

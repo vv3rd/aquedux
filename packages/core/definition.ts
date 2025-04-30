@@ -1,6 +1,6 @@
-import { Pretty } from "../tools/ts";
 import { freeze, Immutable } from "../tools/objects";
 import { safe, same, noop, Is, Callback } from "../tools/functions";
+import { randomString } from "../tools/strings";
 
 export interface Msg<T extends Msg.Type = Msg.Type> {
     type: T;
@@ -10,8 +10,16 @@ export interface MsgWith<P, T extends Msg.Type = Msg.Type> extends Msg<T> {
     payload: P;
 }
 
+interface MsgUntyped extends Msg {
+    [key: string]: any;
+}
+
 export interface Dispatch {
-    (message: Msg): void;
+    (message: MsgUntyped): void;
+}
+
+export interface Execute<TState, TCtx> {
+    <T>(task: Task<T, TState, TCtx>): T;
 }
 
 export interface Reducer<TState, TMsg = Msg, TCtx = {}> {
@@ -40,7 +48,7 @@ export interface Control<TState, TCtx = {}> {
     subscribe: (callback: Callback) => Subscription;
     unsubscribe: (callback: Callback) => void;
 
-    execute: <T>(task: Task<T, TState, TCtx>) => T;
+    execute: Execute<TState, TCtx>;
     catch: (...errors: unknown[]) => void;
 }
 
@@ -48,19 +56,18 @@ interface Unsubscribe {
     (): void;
 }
 
-interface Subscription extends Unsubscribe {
+interface Subscription {
     onUnsubscribe: (teardown: () => void) => void;
     nextMessage: () => Promise<Msg>;
     lastMessage: () => Msg;
+    unsubscribe: Unsubscribe;
 }
 
 interface MsgStream<TState> extends Subscription, AsyncIterable<Msg> {
-    query: {
-        (checker: (state: TState) => boolean): Promise<TState>;
-        <U extends TState>(predicate: (state: TState) => state is U): Promise<U>;
-        <T>(selector: (state: TState) => T | null | undefined | false): Promise<T>;
-        <M extends Msg>(matcher: { match: Is<M> }): Promise<M>;
-    };
+    query(checker: (state: TState) => boolean): Promise<TState>;
+    query<T>(selector: (state: TState) => T | null | undefined | false): Promise<T>;
+    query<U extends TState>(predicate: (state: TState) => state is U): Promise<U>;
+    query<M extends Msg>(matcher: { match: Is<M> }): Promise<M>;
 }
 
 export namespace Msg {
@@ -92,10 +99,11 @@ export namespace Reducer {
     }
 
     export function initialize<TState>(reducer: Reducer<TState, any, any>): TState {
-        let rtrn = reducer(undefined, { type: Math.random().toString(36).substring(2) }, noop);
+        let rtrn = reducer(undefined, { type: randomString() }, noop);
         return rtrn;
     }
 
+    export type Any = Reducer<any, any, any>;
     export type inferMsg<R> = R extends Reducer<any, infer TMsg, any> ? TMsg : never;
     export type inferCtx<R> = R extends Reducer<any, any, infer TCtx> ? TCtx : never;
     export type inferState<R> = R extends Reducer<infer S, any, any> ? S : never;
@@ -187,11 +195,12 @@ const createControlImpl: createControlImpl = (final) => (reducer, context) => {
                 };
                 listeners.set(callback, listener);
             }
-            const sub: Subscription = () => self.unsubscribe(callback);
-            sub.onUnsubscribe = (teardown) => listener.cleanups.push(teardown);
-            sub.lastMessage = () => lastMsg;
-            sub.nextMessage = () => nextMsg.promise;
-            return sub;
+            return {
+                onUnsubscribe: (teardown) => listener.cleanups.push(teardown),
+                lastMessage: () => lastMsg,
+                nextMessage: () => nextMsg.promise,
+                unsubscribe: () => self.unsubscribe(callback),
+            };
         },
 
         unsubscribe(callback) {
@@ -250,16 +259,19 @@ export function createTaskControl<TState, TCtx>(
     return { ...base, subscribe, signal };
 
     function subscribe(listener: Callback = noop): MsgStream<TState> {
-        {
-            const sub = base.subscribe(listener);
-            var unsubscribe = () => sub();
-            var { onUnsubscribe, lastMessage, nextMessage } = sub;
-        }
+        const {
+            //
+            onUnsubscribe,
+            unsubscribe,
+            lastMessage,
+            nextMessage,
+        } = base.subscribe(listener);
 
         signal.addEventListener("abort", unsubscribe);
 
-        const stream: Pretty<MsgStream<TState>> = {
+        const self: MsgStream<TState> = {
             onUnsubscribe: onUnsubscribe,
+            unsubscribe: unsubscribe,
             lastMessage: lastMessage,
             nextMessage: () => {
                 const resolved = nextMessage();
@@ -272,7 +284,7 @@ export function createTaskControl<TState, TCtx>(
 
                     let awaitedMessage: Msg | undefined;
                     while (awaitedMessage === undefined) {
-                        const msg = await stream.nextMessage();
+                        const msg = await self.nextMessage();
                         if (matcher.match(msg)) {
                             awaitedMessage = msg;
                         }
@@ -284,7 +296,7 @@ export function createTaskControl<TState, TCtx>(
                     let state = base.getState();
                     let check = checker(state);
                     while (check == null || check === false) {
-                        await stream.nextMessage();
+                        await self.nextMessage();
                         state = base.getState();
                         check = checker(state);
                     }
@@ -298,14 +310,14 @@ export function createTaskControl<TState, TCtx>(
             [Symbol.asyncIterator]: (): AsyncIterator<Msg> => ({
                 next: async () => {
                     try {
-                        return { value: await stream.nextMessage() };
+                        return { value: await self.nextMessage() };
                     } catch {
                         return { done: true, value: undefined };
                     }
                 },
             }),
         };
-        return Object.assign(unsubscribe, stream);
+        return self;
     }
 }
 
