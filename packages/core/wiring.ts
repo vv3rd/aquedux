@@ -110,12 +110,6 @@ export function makeWiringRoot<TState extends object, TMsg extends Msg, TCtx>(
     return wiringRootReducer;
 }
 
-const FUCK_STUB_USED = "TaskControl on wire probe message is a stub and cannot be used";
-const FUCK_NOT_WIRED = "";
-const FUCK_PROBE_MISUSED =
-    "This should not happen unless you doing something " +
-    "very wrong with scoping Cmd or TaskControls-s";
-
 function createWireRegistry() {
     return {
         createWire: <TState, TMsg extends Msg, TCtx = {}>(
@@ -228,3 +222,10 @@ const createWiringOverlay = () => {
         return previousStore;
     });
 };
+
+const FUCK_STUB_USED = "TaskControl on wire probe message is a stub and cannot be used";
+const FUCK_NOT_WIRED = "";
+const FUCK_PROBE_MISUSED =
+    "This should not happen unless you doing something " +
+    "very wrong with scoping Cmd or TaskControls-s";
+

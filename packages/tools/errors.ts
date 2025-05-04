@@ -1,4 +1,4 @@
-export function panic(error: Error | string) {
+export function panic(error: Error | string): never {
     if (error instanceof Error) throw error;
     else throw trimStack(new Error(error));
 }

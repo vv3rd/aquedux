@@ -35,9 +35,9 @@ export const combineReducers: combineReducers = (reducersObject) => {
     return function combination(current, action, command) {
         let next = current!;
         for (let [key, reducer] of reducers) {
-            const scopedCommand = createScopedCmd(command, (s) => s[key]);
+            const scopedCmd = createScopedCmd(command, (s) => s[key]);
             const stateWas = current?.[key];
-            const stateNow = reducer(stateWas, action, scopedCommand);
+            const stateNow = reducer(stateWas, action, scopedCmd);
             if (stateWas !== stateNow) {
                 if (next === current) {
                     next = { ...current };

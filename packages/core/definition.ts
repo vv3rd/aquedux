@@ -1,6 +1,7 @@
 import { freeze, Immutable } from "../tools/objects";
-import { safe, same, noop, Is, Callback } from "../tools/functions";
+import { safe, same, noop, Callback } from "../tools/functions";
 import { randomString } from "../tools/strings";
+import { panic } from "../tools/errors";
 
 export interface Msg<T extends Msg.Type = Msg.Type> {
     type: T;
@@ -15,11 +16,30 @@ interface MsgUntyped extends Msg {
 }
 
 export interface Dispatch {
-    (message: MsgUntyped): void;
+    (this: Control<any, any>, message: MsgUntyped): void;
+}
+export declare namespace Dispatch {
+    interface Haver {
+        dispatch: Dispatch;
+    }
 }
 
-export interface Execute<TState, TCtx> {
-    <T>(task: Task<T, TState, TCtx>): T;
+export interface Execute {
+    <T, TState, TCtx>(this: Control<TState, TCtx>, task: Task<T, TState, TCtx>): T;
+}
+export declare namespace Execute {
+    interface Haver {
+        execute: Execute;
+    }
+}
+
+export interface Select {
+    <T, TState, TCtx>(this: Control<TState, TCtx>, map: (state: TState) => T): Control<T, TCtx>;
+}
+export declare namespace Select {
+    interface Haver {
+        select: Select;
+    }
 }
 
 export interface Reducer<TState, TMsg extends Msg = Msg, TCtx = {}> {
@@ -36,20 +56,16 @@ export interface Task<TResult, TState, TCtx = {}> {
 }
 
 export interface TaskControl<TState, TCtx = {}> extends Control<TState, TCtx> {
-    subscribe: (callback?: Callback) => MsgStream<TState>;
     signal: AbortSignal;
 }
 
 export interface Control<TState, TCtx = {}> {
-    dispatch: Dispatch;
-    getState: () => TState;
-
     context: Immutable<TCtx>;
-
+    getState: () => TState;
     subscribe: (callback: Callback) => Subscription;
-    unsubscribe: (callback: Callback) => void;
-
-    execute: Execute<TState, TCtx>;
+    select: Select;
+    dispatch: Dispatch;
+    execute: Execute;
     catch: (...errors: unknown[]) => void;
 }
 
@@ -57,18 +73,11 @@ interface Unsubscribe {
     (): void;
 }
 
-interface Subscription {
+export interface Subscription {
     onUnsubscribe: (teardown: () => void) => void;
     nextMessage: () => Promise<Msg>;
     lastMessage: () => Msg;
     unsubscribe: Unsubscribe;
-}
-
-interface MsgStream<TState> extends Subscription, AsyncIterable<Msg> {
-    query(checker: (state: TState) => boolean): Promise<TState>;
-    query<T>(selector: (state: TState) => T | null | undefined | false): Promise<T>;
-    query<U extends TState>(predicate: (state: TState) => state is U): Promise<U>;
-    query<M extends Msg>(matcher: { match: Is<M> }): Promise<M>;
 }
 
 export declare namespace Msg {
@@ -86,8 +95,8 @@ export declare namespace Msg {
 }
 
 export declare namespace Control {
-    type inferCtx<R> = R extends Control<any, infer TCtx> ? TCtx : never;
-    type inferState<R> = R extends Control<infer S, any> ? S : never;
+    type inferCtx<R> = R extends { context: infer TCtx } ? TCtx : never;
+    type inferState<R> = R extends { getState: () => infer TState } ? TState : never;
 }
 
 export function Reducer<TState, TMsg extends Msg<any> = Msg, TCtx = {}>(
@@ -98,7 +107,7 @@ export function Reducer<TState, TMsg extends Msg<any> = Msg, TCtx = {}>(
 
 Reducer.initialize = function initialize<TState>(reducer: Reducer<TState, any, any>): TState {
     if (reducer.getInitialState) {
-        return reducer.getInitialState()
+        return reducer.getInitialState();
     }
     return reducer(undefined, { type: randomString() }, noop);
 };
@@ -155,10 +164,21 @@ const createControlImpl: createControlImpl = (final) => (reducer, context) => {
     let lastMsg: TMsg;
     let nextMsg: PromiseWithResolvers<TMsg> = Promise.withResolvers();
 
-    const listeners = new Map<Callback, { notify: Callback; cleanups: Array<Callback> }>();
+    type Listener = {
+        notify: Callback;
+        cleanups: Array<Callback>;
+        count: number;
+    };
+
+    const listeners = new Map<Callback, Listener>();
 
     const activeControl: TSelf = {
         context,
+
+        select(selector) {
+            return { ...this, getState: () => selector(this.getState()) };
+        },
+
         getState() {
             return state;
         },
@@ -169,51 +189,53 @@ const createControlImpl: createControlImpl = (final) => (reducer, context) => {
             }
             let tasks: Task<void, TState, TCtx>[] = [];
             try {
-                delegate = lockedControl;
+                lockControl();
                 state = reducer(state, msg, (t) => tasks.push(t));
             } finally {
-                delegate = activeControl;
+                unlockControl();
                 freeze(tasks);
             }
             lastMsg = msg;
             nextMsg.resolve(msg);
             nextMsg = Promise.withResolvers();
 
-            const self = final();
             const errs: unknown[] = [];
-            // biome-ignore format:
+            /* biome-ignore format: */ {
             for (const [_, l] of listeners) try { l.notify() } catch (e) { errs.push(e) }
-            // biome-ignore format:
-            for (const t of tasks) try { self.execute(t) } catch (e) { errs.push(e) }
+            for (const t of tasks) try { this.execute(t) } catch (e) { errs.push(e) }
+            }
             if (errs.length) {
-                self.catch(...errs);
+                this.catch(...errs);
             }
         },
 
         subscribe(callback) {
-            const self = final();
             let listener = listeners.get(callback);
-            if (listener === undefined) {
-                listener = {
-                    notify: callback,
-                    cleanups: [],
-                };
+            if (listener !== undefined) {
+                listener.count += 1;
+            } else {
+                listener = { notify: callback, cleanups: [], count: 0 };
                 listeners.set(callback, listener);
             }
+
+            // FIXME: counting subscriptions might be not the same as counting selector observers
+            // i could attach same reference of listener callback to each selector via WeakMap
+            // but it doesn't seam like resilient solution
             return {
                 onUnsubscribe: (teardown) => listener.cleanups.push(teardown),
                 lastMessage: () => lastMsg,
                 nextMessage: () => nextMsg.promise,
-                unsubscribe: () => self.unsubscribe(callback),
+                unsubscribe: () => {
+                    const listener = listeners.get(callback);
+                    if (!listener) {
+                        return;
+                    }
+                    if (--listener.count === 0) {
+                        listeners.delete(callback);
+                        listener.cleanups.forEach((fn) => fn());
+                    }
+                },
             };
-        },
-
-        unsubscribe(callback) {
-            const listener = listeners.get(callback);
-            if (listener) {
-                listeners.delete(callback);
-                listener.cleanups.forEach((fn) => fn());
-            }
         },
 
         execute(task) {
@@ -221,7 +243,7 @@ const createControlImpl: createControlImpl = (final) => (reducer, context) => {
             const doTask = safe(task, {
                 finally: () => ac.abort(new Error(TASK_EXITED_ERR)),
             });
-            const result = doTask(createTaskControl(final(), ac.signal));
+            const result = doTask(createTaskControl(this, ac.signal));
             return result;
         },
 
@@ -232,98 +254,57 @@ const createControlImpl: createControlImpl = (final) => (reducer, context) => {
         },
     };
 
-    let delegate: TSelf = activeControl;
+    {
+        let delegate: TSelf = activeControl;
+        var lockControl = () => {
+            delegate = lockedControl;
+        };
+        var unlockControl = () => {
+            delegate = activeControl;
+        };
 
-    // biome-ignore format: saves space
-    const lockedControl: TSelf = {
-        context,
-        dispatch() { throw new Error(CTRL_LOCKED_ERR); },
-        execute() { throw new Error(CTRL_LOCKED_ERR); },
-        catch() { throw new Error(CTRL_LOCKED_ERR); },
-        getState() { throw new Error(CTRL_LOCKED_ERR); },
-        subscribe() { throw new Error(CTRL_LOCKED_ERR); },
-        unsubscribe() { throw new Error(CTRL_LOCKED_ERR); },
-    };
+        const lockedControl: TSelf = {
+            context,
+            dispatch: () => panic(CTRL_LOCKED_ERR),
+            execute: () => panic(CTRL_LOCKED_ERR),
+            catch: () => panic(CTRL_LOCKED_ERR),
+            getState: () => panic(CTRL_LOCKED_ERR),
+            subscribe: () => panic(CTRL_LOCKED_ERR),
+            select: () => panic(CTRL_LOCKED_ERR),
+        };
 
-    // biome-ignore format: better visual
-    return {
-        context,
-		dispatch:    (...a) => delegate.dispatch(...a),
-		execute:     (...a) => delegate.execute(...a),
-		catch:       (...a) => delegate.catch(...a),
-		getState:        () => delegate.getState(),
-		subscribe:   (...a) => delegate.subscribe(...a),
-		unsubscribe: (...a) => delegate.unsubscribe(...a),
-	};
+        return {
+            context,
+            dispatch: (...a) => delegate.dispatch(...a),
+            execute: (...a) => delegate.execute(...a),
+            select: (...a) => delegate.select(...a),
+            catch: (...a) => delegate.catch(...a),
+            getState: () => delegate.getState(),
+            subscribe: (...a) => delegate.subscribe(...a),
+        };
+    }
 };
 
 export function createTaskControl<TState, TCtx>(
     base: Control<TState, TCtx>,
     signal: AbortSignal,
 ): TaskControl<TState, TCtx> {
-    return { ...base, subscribe, signal };
-
-    function subscribe(listener: Callback = noop): MsgStream<TState> {
-        const {
-            //
-            onUnsubscribe,
-            unsubscribe,
-            lastMessage,
-            nextMessage,
-        } = base.subscribe(listener);
-
-        signal.addEventListener("abort", unsubscribe);
-
-        const self: MsgStream<TState> = {
-            onUnsubscribe: onUnsubscribe,
-            unsubscribe: unsubscribe,
-            lastMessage: lastMessage,
-            nextMessage: () => {
-                const resolved = nextMessage();
-                const disposed = new Promise<never>((_, reject) => onUnsubscribe(reject));
-                return Promise.race([resolved, disposed]);
-            },
-            query: async (arg: any) => {
-                if ("match" in arg) {
-                    const matcher = arg;
-
-                    let awaitedMessage: Msg | undefined;
-                    while (awaitedMessage === undefined) {
-                        const msg = await self.nextMessage();
-                        if (matcher.match(msg)) {
-                            awaitedMessage = msg;
-                        }
-                    }
-                    return awaitedMessage;
-                } else {
-                    const checker = arg;
-
-                    let state = base.getState();
-                    let check = checker(state);
-                    while (check == null || check === false) {
-                        await self.nextMessage();
-                        state = base.getState();
-                        check = checker(state);
-                    }
-                    if (typeof check === "boolean") {
-                        return state;
-                    } else {
-                        return check;
-                    }
-                }
-            },
-            [Symbol.asyncIterator]: (): AsyncIterator<Msg> => ({
-                next: async () => {
-                    try {
-                        return { value: await self.nextMessage() };
-                    } catch {
-                        return { done: true, value: undefined };
-                    }
+    return {
+        ...base,
+        signal,
+        subscribe(listener: Callback): Subscription {
+            const sub = base.subscribe(listener);
+            signal.addEventListener("abort", sub.unsubscribe);
+            return {
+                ...sub,
+                nextMessage: () => {
+                    const resolved = sub.nextMessage();
+                    const disposed = new Promise<never>((_, reject) => sub.onUnsubscribe(reject));
+                    return Promise.race([resolved, disposed]);
                 },
-            }),
-        };
-        return self;
-    }
+            };
+        },
+    };
 }
 
 const CTRL_LOCKED_ERR = "Control is locked on dispatch";

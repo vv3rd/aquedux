@@ -50,10 +50,11 @@ export function useDispatch<T extends { [key: string]: MsgFactory<Msg<any>, any[
     messages?: T,
 ) {
     const ctl = useControl();
+    const dispatch = useCallback((msg: Msg) => ctl.dispatch(msg), [ctl]);
     if (messages) {
-        return bindMsgFactories(ctl.dispatch)(messages);
+        return bindMsgFactories(dispatch)(messages);
     } else {
-        return ctl.dispatch;
+        return dispatch;
     }
 }
 
