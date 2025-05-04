@@ -22,8 +22,9 @@ export interface Execute<TState, TCtx> {
     <T>(task: Task<T, TState, TCtx>): T;
 }
 
-export interface Reducer<TState, TMsg = Msg, TCtx = {}> {
+export interface Reducer<TState, TMsg extends Msg = Msg, TCtx = {}> {
     (state: TState | undefined, msg: TMsg, cmd: Cmd<TState, TCtx>): TState;
+    getInitialState?: () => TState;
 }
 
 export interface Cmd<TState, TCtx = {}> {
@@ -70,43 +71,43 @@ interface MsgStream<TState> extends Subscription, AsyncIterable<Msg> {
     query<M extends Msg>(matcher: { match: Is<M> }): Promise<M>;
 }
 
-export namespace Msg {
-    export type Type = string;
-    export interface Matcher<TMsg extends Msg> {
+export declare namespace Msg {
+    type Type = string;
+    interface Matcher<TMsg extends Msg> {
         match: (message: Msg) => message is TMsg;
     }
 
-    export type inferPayload<TMsg extends Msg> = TMsg extends MsgWith<infer P> ? P : void;
-    export type inferMatch<TMatcher extends Matcher<any>> = TMatcher extends Matcher<infer T>
-        ? T
-        : never;
+    type inferPayload<TMsg extends Msg> = TMsg extends MsgWith<infer P> ? P : void;
+    type inferMatch<TMatcher extends Matcher<any>> = TMatcher extends Matcher<infer T> ? T : never;
 
-    export type Family<T extends { [key: string]: any }> = {
+    type Family<T extends { [key: string]: any }> = {
         [K in keyof T]: K extends string ? (T[K] extends void ? Msg<K> : MsgWith<T[K], K>) : never;
     }[keyof T];
 }
 
-export namespace Control {
-    export type inferCtx<R> = R extends Control<any, infer TCtx> ? TCtx : never;
-    export type inferState<R> = R extends Control<infer S, any> ? S : never;
+export declare namespace Control {
+    type inferCtx<R> = R extends Control<any, infer TCtx> ? TCtx : never;
+    type inferState<R> = R extends Control<infer S, any> ? S : never;
 }
 
-export namespace Reducer {
-    export function define<TState, TMsg extends Msg<any> = Msg, TCtx = {}>(
-        reducer: Reducer<TState, TMsg, TCtx>,
-    ) {
-        return reducer;
-    }
+export function Reducer<TState, TMsg extends Msg<any> = Msg, TCtx = {}>(
+    reducer: Reducer<TState, TMsg, TCtx>,
+) {
+    return reducer;
+}
 
-    export function initialize<TState>(reducer: Reducer<TState, any, any>): TState {
-        let rtrn = reducer(undefined, { type: randomString() }, noop);
-        return rtrn;
+Reducer.initialize = function initialize<TState>(reducer: Reducer<TState, any, any>): TState {
+    if (reducer.getInitialState) {
+        return reducer.getInitialState()
     }
+    return reducer(undefined, { type: randomString() }, noop);
+};
 
-    export type Any = Reducer<any, any, any>;
-    export type inferMsg<R> = R extends Reducer<any, infer TMsg, any> ? TMsg : never;
-    export type inferCtx<R> = R extends Reducer<any, any, infer TCtx> ? TCtx : never;
-    export type inferState<R> = R extends Reducer<infer S, any, any> ? S : never;
+export declare namespace Reducer {
+    type Any = Reducer<any, any, any>;
+    type inferMsg<R> = R extends Reducer<any, infer TMsg, any> ? TMsg : never;
+    type inferCtx<R> = R extends Reducer<any, any, infer TCtx> ? TCtx : never;
+    type inferState<R> = R extends Reducer<infer S, any, any> ? S : never;
 }
 
 /* ========================
@@ -117,6 +118,10 @@ type ControlOverlay<TState, TCtx> = (
     creator: ControlCreator<TState, TCtx>,
     final: () => Control<TState, TCtx>,
 ) => ControlCreator<TState, TCtx>;
+
+export function ControlOverlay<TState, TCtx = {}>(overlay: ControlOverlay<TState, TCtx>) {
+    return overlay;
+}
 
 type ControlCreator<TState, TCtx> = (
     reducer: Reducer<TState, Msg<any>, TCtx>,

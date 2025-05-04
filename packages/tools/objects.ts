@@ -1,6 +1,8 @@
 import { Fn } from "./functions";
 import type { primitive } from "./ts";
 
+export type Obj<T = unknown, K extends keyof any = string> = Record<K, T>;
+
 const { prototype, getPrototypeOf, entries, fromEntries } = Object;
 
 export const { freeze } = Object;

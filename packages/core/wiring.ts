@@ -1,7 +1,9 @@
 import { panic } from "../tools/errors";
 import type { Fn } from "../tools/functions";
-import { freeze, sortToString } from "../tools/objects";
-import { Reducer, Task, Msg, TaskControl } from "./definition";
+import { Obj, freeze, sortToString } from "../tools/objects";
+import { randomString } from "../tools/strings";
+import { primitive } from "../tools/ts";
+import { Reducer, Task, Msg, TaskControl, ControlOverlay } from "./definition";
 import { getInitialState } from "./reducers";
 
 function probeMsg(setterTask: (wireId: string) => Task<void, unknown, unknown>) {
@@ -125,8 +127,26 @@ function createWireRegistry() {
 interface WiresContainer {
     [wireKey: `${string}(${string})`]: {
         value: unknown;
-        createdBy: Msg<any>
+        createdBy: Msg<any>;
+        refKey: object;
     };
+}
+
+const mutableRefsRegistry = new WeakMap();
+const mutableRefIdentity = Symbol();
+function createMutableRef<T extends primitive>(value: T) {
+    const ref = Object.create(null);
+    const descriptor = {
+        enumerable: false,
+        configurable: false,
+        value: () => `MutableRef`,
+    };
+    Object.defineProperties(ref, {
+        toJSON: descriptor,
+        toString: descriptor,
+        valueOf: descriptor,
+        [Symbol.toPrimitive]: descriptor,
+    });
 }
 
 export function createWire<TState, TMsg extends Msg, TCtx = {}, TParams = void>(
@@ -194,3 +214,17 @@ export function createWire<TState, TMsg extends Msg, TCtx = {}, TParams = void>(
 
     return reducerFactory;
 }
+
+const createWiringOverlay = () => {
+    return ControlOverlay<Obj, Obj>((createStore) => (reducer, context) => {
+        const id = randomString();
+        const getInitialState = () => {
+            return Reducer.initialize(reducer);
+        };
+
+        const wiredReducer = makeWiringRoot(reducer);
+        const previousStore = createStore(wiredReducer, { ...context, id });
+
+        return previousStore;
+    });
+};

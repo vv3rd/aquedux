@@ -8,11 +8,6 @@ import {
     ErrFallbackEl,
     silenceExpectedConsoleError,
 } from "./help";
-import { createControl, Msg, MsgWith, Cmd } from "../packages/core/definition";
-import { combineReducers } from "../packages/core/reducers";
-import { Reducer } from "../packages/core/definition";
-import { ObjectHTMLAttributes } from "react";
-import { createWire } from "../packages/core/wiring";
 
 silenceExpectedConsoleError();
 
