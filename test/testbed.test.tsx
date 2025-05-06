@@ -8,6 +8,8 @@ import {
     ErrFallbackEl,
     silenceExpectedConsoleError,
 } from "./help";
+import { createControl, Reducer } from "../packages/core/control";
+import { same } from "../packages/tools/functions";
 
 silenceExpectedConsoleError();
 
@@ -30,3 +32,17 @@ test("catches", async () => {
     await act(() => render(<Boundry children={<Await the={error} />} />));
     expect(screen.getByTestId(ErrFallbackEl)).toBeInTheDocument();
 });
+
+const reducer: Reducer<{ foo: { bar: { baz: string } } }> = (
+    state = { foo: { bar: { baz: "kek" } } },
+) => {
+    return state;
+};
+
+const ctrl = createControl(reducer);
+
+ctrl.select((f) => f.foo)
+    .select((f) => f.bar)
+    .execute((ctl) => {
+        ctl.snapshot();
+    });

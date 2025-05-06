@@ -1,5 +1,5 @@
 import { sortToString } from "../tools/objects";
-import { Cmd, Task, TaskControl, Msg, MsgWith } from "../core/definition";
+import { Cmd, Task, TaskControl, Msg, MsgWith } from "../core/control";
 import { todo } from "../tools/errors";
 import { memoOne } from "../tools/functions";
 import { defineMsgGroup } from "../core/messages";

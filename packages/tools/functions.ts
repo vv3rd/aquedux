@@ -15,8 +15,8 @@ export declare namespace Fn {
 export type Callback = () => void;
 export type Procedure = () => Promise<void>;
 
-export type Get<TReturn> = () => TReturn;
-export type Lazy<T> = T | Get<T>;
+export type GetterOf<TReturn> = () => TReturn;
+export type Lazy<T> = T | GetterOf<T>;
 
 export type Is<T> = (thing: unknown) => thing is T;
 

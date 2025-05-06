@@ -1,4 +1,4 @@
-import { Cmd } from "./definition";
+import { Cmd } from "./control";
 
 type createScopedCmd = <TStateA, TStateB, TCtx>(
     command: Cmd<TStateA, TCtx>,
@@ -6,5 +6,5 @@ type createScopedCmd = <TStateA, TStateB, TCtx>(
 ) => Cmd<TStateB, TCtx>;
 
 export const createScopedCmd: createScopedCmd = (cmd, selector) => (task) => {
-    cmd((ctl) => task({ ...ctl, getState: () => selector(ctl.getState()) }));
+    cmd((ctl) => task({ ...ctl, snapshot: () => selector(ctl.snapshot()) }));
 };

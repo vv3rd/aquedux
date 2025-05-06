@@ -1,5 +1,5 @@
 import { Is } from "../tools/functions";
-import { Subscription, Msg } from "./definition";
+import { Subscription, Msg } from "./control";
 
 export interface MsgStream<TState> extends Subscription, AsyncIterable<Msg> {
     query(checker: (state: TState) => boolean): Promise<TState>;

@@ -1,7 +1,8 @@
 import { freeze, Immutable } from "../tools/objects";
-import { safe, same, noop, Callback } from "../tools/functions";
+import { safe, same, noop, Callback, GetterOf } from "../tools/functions";
 import { randomString } from "../tools/strings";
 import { panic } from "../tools/errors";
+import { Pretty } from "../tools/ts";
 
 export interface Msg<T extends Msg.Type = Msg.Type> {
     type: T;
@@ -11,12 +12,23 @@ export interface MsgWith<P, T extends Msg.Type = Msg.Type> extends Msg<T> {
     payload: P;
 }
 
-interface MsgUntyped extends Msg {
-    [key: string]: any;
+export declare namespace Msg {
+    type Any = Msg<any> & { [key: string]: any };
+    type Type = string;
+    interface Matcher<TMsg extends Msg> {
+        match: (message: Msg) => message is TMsg;
+    }
+
+    type inferPayload<TMsg extends Msg> = TMsg extends MsgWith<infer P> ? P : void;
+    type inferMatch<TMatcher extends Matcher<any>> = TMatcher extends Matcher<infer T> ? T : never;
+
+    type Family<T extends { [key: string]: any }> = {
+        [K in keyof T]: K extends string ? (T[K] extends void ? Msg<K> : MsgWith<T[K], K>) : never;
+    }[keyof T];
 }
 
 export interface Dispatch {
-    (this: Control<any, any>, message: MsgUntyped): void;
+    (this: Control.Any, message: Msg.Any): void;
 }
 export declare namespace Dispatch {
     interface Haver {
@@ -47,59 +59,7 @@ export interface Reducer<TState, TMsg extends Msg = Msg, TCtx = {}> {
     getInitialState?: () => TState;
 }
 
-export interface Cmd<TState, TCtx = {}> {
-    (task: Task<void, TState, TCtx>): void;
-}
-
-export interface Task<TResult, TState, TCtx = {}> {
-    (control: TaskControl<TState, TCtx>): TResult;
-}
-
-export interface TaskControl<TState, TCtx = {}> extends Control<TState, TCtx> {
-    signal: AbortSignal;
-}
-
-export interface Control<TState, TCtx = {}> {
-    context: Immutable<TCtx>;
-    getState: () => TState;
-    subscribe: (callback: Callback) => Subscription;
-    select: Select;
-    dispatch: Dispatch;
-    execute: Execute;
-    catch: (...errors: unknown[]) => void;
-}
-
-interface Unsubscribe {
-    (): void;
-}
-
-export interface Subscription {
-    onUnsubscribe: (teardown: () => void) => void;
-    nextMessage: () => Promise<Msg>;
-    lastMessage: () => Msg;
-    unsubscribe: Unsubscribe;
-}
-
-export declare namespace Msg {
-    type Type = string;
-    interface Matcher<TMsg extends Msg> {
-        match: (message: Msg) => message is TMsg;
-    }
-
-    type inferPayload<TMsg extends Msg> = TMsg extends MsgWith<infer P> ? P : void;
-    type inferMatch<TMatcher extends Matcher<any>> = TMatcher extends Matcher<infer T> ? T : never;
-
-    type Family<T extends { [key: string]: any }> = {
-        [K in keyof T]: K extends string ? (T[K] extends void ? Msg<K> : MsgWith<T[K], K>) : never;
-    }[keyof T];
-}
-
-export declare namespace Control {
-    type inferCtx<R> = R extends { context: infer TCtx } ? TCtx : never;
-    type inferState<R> = R extends { getState: () => infer TState } ? TState : never;
-}
-
-export function Reducer<TState, TMsg extends Msg<any> = Msg, TCtx = {}>(
+export function Reducer<TState, TMsg extends Msg.Any = Msg.Any, TCtx = {}>(
     reducer: Reducer<TState, TMsg, TCtx>,
 ) {
     return reducer;
@@ -119,6 +79,54 @@ export declare namespace Reducer {
     type inferState<R> = R extends Reducer<infer S, any, any> ? S : never;
 }
 
+export interface Cmd<TState, TCtx = {}> {
+    (task: Task<void, TState, TCtx>): void;
+}
+
+export interface Task<TResult, TState, TCtx = {}> {
+    (control: TaskControl<TState, TCtx>): TResult;
+}
+
+export interface TaskControl<TState, TCtx = {}> extends Control<TState, TCtx> {
+    signal: AbortSignal;
+}
+
+type ControlType<TState, TCtx> = Pretty<
+    {
+        [key in keyof { readonly "~TState": unique symbol }]?: TState;
+    } & {
+        [key in keyof { readonly "~TCtx": unique symbol }]?: TCtx;
+    }
+>;
+
+interface ControlData<TState, TCtx> {
+    snapshot: GetterOf<TState>;
+    context: Immutable<TCtx>;
+}
+export interface Control<TState, TCtx = {}> extends ControlData<TState, TCtx> {
+    subscribe: (callback: Callback) => Subscription;
+    select: Select;
+    dispatch: Dispatch;
+    execute: Execute;
+    catch: (...errors: unknown[]) => void;
+}
+export declare namespace Control {
+    type Any = Control<any, any>;
+    type inferCtx<R> = R extends ControlData<any, infer TCtx> ? TCtx : never;
+    type inferState<R> = R extends ControlData<infer TState, any> ? TState : never;
+}
+
+interface Unsubscribe {
+    (): void;
+}
+
+export interface Subscription {
+    onUnsubscribe: (teardown: () => void) => void;
+    nextMessage: () => Promise<Msg>;
+    lastMessage: () => Msg;
+    unsubscribe: Unsubscribe;
+}
+
 /* ========================
     creating
    ======================== */
@@ -133,12 +141,12 @@ export function ControlOverlay<TState, TCtx = {}>(overlay: ControlOverlay<TState
 }
 
 type ControlCreator<TState, TCtx> = (
-    reducer: Reducer<TState, Msg<any>, TCtx>,
+    reducer: Reducer<TState, Msg.Any, TCtx>,
     context: TCtx,
 ) => Control<TState, TCtx>;
 
 export function createControl<TState, TCtx = {}>(
-    reducer: Reducer<TState, Msg<any>, TCtx>,
+    reducer: Reducer<TState, Msg.Any, TCtx>,
     {
         context = {} as TCtx,
         overlay = same,
@@ -153,7 +161,7 @@ export function createControl<TState, TCtx = {}>(
     return it;
 }
 
-type createControlImpl = (final: () => Control<any, any>) => ControlCreator<any, any>;
+type createControlImpl = (final: () => Control.Any) => ControlCreator<any, any>;
 const createControlImpl: createControlImpl = (final) => (reducer, context) => {
     type TState = Reducer.inferState<typeof reducer>;
     type TMsg = Msg;
@@ -161,25 +169,21 @@ const createControlImpl: createControlImpl = (final) => (reducer, context) => {
     type TSelf = Control<TState, TCtx>;
 
     let state: TState = Reducer.initialize(reducer);
+
+    type Listener = { notify: Callback; cleanups: Array<Callback>; count: number };
+    const listeners = new Map<Callback, Listener>();
     let lastMsg: TMsg;
     let nextMsg: PromiseWithResolvers<TMsg> = Promise.withResolvers();
-
-    type Listener = {
-        notify: Callback;
-        cleanups: Array<Callback>;
-        count: number;
-    };
-
-    const listeners = new Map<Callback, Listener>();
 
     const activeControl: TSelf = {
         context,
 
         select(selector) {
-            return { ...this, getState: () => selector(this.getState()) };
+            // TODO: add per-selector registries of listeners, continue thinking on how nextMessage should work
+            return { ...this, snapshot: () => selector(this.snapshot()) };
         },
 
-        getState() {
+        snapshot() {
             return state;
         },
 
@@ -200,10 +204,10 @@ const createControlImpl: createControlImpl = (final) => (reducer, context) => {
             nextMsg = Promise.withResolvers();
 
             const errs: unknown[] = [];
-            /* biome-ignore format: */ {
+            /* biome-ignore format: */
             for (const [_, l] of listeners) try { l.notify() } catch (e) { errs.push(e) }
+            /* biome-ignore format: */
             for (const t of tasks) try { this.execute(t) } catch (e) { errs.push(e) }
-            }
             if (errs.length) {
                 this.catch(...errs);
             }
@@ -268,7 +272,7 @@ const createControlImpl: createControlImpl = (final) => (reducer, context) => {
             dispatch: () => panic(CTRL_LOCKED_ERR),
             execute: () => panic(CTRL_LOCKED_ERR),
             catch: () => panic(CTRL_LOCKED_ERR),
-            getState: () => panic(CTRL_LOCKED_ERR),
+            snapshot: () => panic(CTRL_LOCKED_ERR),
             subscribe: () => panic(CTRL_LOCKED_ERR),
             select: () => panic(CTRL_LOCKED_ERR),
         };
@@ -279,7 +283,7 @@ const createControlImpl: createControlImpl = (final) => (reducer, context) => {
             execute: (...a) => delegate.execute(...a),
             select: (...a) => delegate.select(...a),
             catch: (...a) => delegate.catch(...a),
-            getState: () => delegate.getState(),
+            snapshot: () => delegate.snapshot(),
             subscribe: (...a) => delegate.subscribe(...a),
         };
     }

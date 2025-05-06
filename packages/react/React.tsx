@@ -7,7 +7,7 @@ import React, {
     useRef,
     useSyncExternalStore,
 } from "react";
-import { Control, Msg } from "../core/definition";
+import { Control, Msg } from "../core/control";
 import { bindMsgFactories, MsgFactory } from "../core/messages";
 import { Wire } from "../core/wiring";
 
@@ -33,7 +33,7 @@ function useControl() {
 
 export function useSelector<T>(selector: (state: any) => T) {
     const ctl = useControl();
-    const snapshot = useCallback(() => selector(ctl.getState()), [ctl, selector]);
+    const snapshot = useCallback(() => selector(ctl.snapshot()), [ctl, selector]);
     const value = useSyncExternalStore(
         useCallback((cb) => ctl.subscribe(cb).unsubscribe, [ctl]),
         snapshot,
@@ -46,7 +46,7 @@ export function useWire<T>(wire: Wire<T>) {
     return useSelector(wire.selectOwnState);
 }
 
-export function useDispatch<T extends { [key: string]: MsgFactory<Msg<any>, any[]> }>(
+export function useDispatch<T extends { [key: string]: MsgFactory<Msg.Any, any[]> }>(
     messages?: T,
 ) {
     const ctl = useControl();

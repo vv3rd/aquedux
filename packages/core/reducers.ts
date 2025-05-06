@@ -1,7 +1,7 @@
 import { asEntries } from "../tools/objects";
 import { isPlainObject } from "../tools/objects";
 import { Fn } from "../tools/functions";
-import { Cmd, Reducer, MsgWith, Msg } from "./definition";
+import { Cmd, Reducer, MsgWith, Msg } from "./control";
 import { createScopedCmd } from "./scoping";
 import { defineMsg, TypedMsgFactory } from "./messages";
 

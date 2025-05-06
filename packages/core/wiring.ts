@@ -3,7 +3,7 @@ import type { Fn } from "../tools/functions";
 import { Obj, freeze, sortToString } from "../tools/objects";
 import { randomString } from "../tools/strings";
 import { primitive } from "../tools/ts";
-import { Reducer, Task, Msg, TaskControl, ControlOverlay } from "./definition";
+import { Reducer, Task, Msg, TaskControl, ControlOverlay, Control } from "./control";
 import { getInitialState } from "./reducers";
 
 function probeMsg(setterTask: (wireId: string) => Task<void, unknown, unknown>) {
@@ -59,7 +59,7 @@ export function makeWiringRoot<TState extends object, TMsg extends Msg, TCtx>(
 
     const wireMeta: Record<string, (state: TStateWithWires) => unknown> = {};
     const probe = probeMsg((wireId) => (api) => {
-        wireMeta[wireId] = makeWireSelector(api.getState);
+        wireMeta[wireId] = makeWireSelector(api.snapshot);
     });
 
     let tasks: TTask[] | TTask = [];
@@ -71,7 +71,7 @@ export function makeWiringRoot<TState extends object, TMsg extends Msg, TCtx>(
 
     const stubTaskControl = new Proxy({} as Fn.Arg<TTask>, {
         get: (_, prop: string) => {
-            if (prop === "getState") {
+            if (prop === ("snapshot" satisfies keyof Control.Any)) {
                 return () => stateGetter();
             } else {
                 return () => panic(FUCK_STUB_USED);
@@ -228,4 +228,3 @@ const FUCK_NOT_WIRED = "";
 const FUCK_PROBE_MISUSED =
     "This should not happen unless you doing something " +
     "very wrong with scoping Cmd or TaskControls-s";
-

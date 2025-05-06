@@ -37,7 +37,7 @@ export function isPlainObject(thing: any): thing is { [key: PropertyKey]: unknow
     return getPrototypeOf(thing) === prototype || getPrototypeOf(thing) === null;
 }
 
-export function sortToString(thing: unknown): string | undefined {
+export function sortToString(thing: unknown): string {
     return JSON.stringify(thing, (_, original) => {
         if (isPlainObject(original)) {
             const keys = Object.keys(original).sort();
