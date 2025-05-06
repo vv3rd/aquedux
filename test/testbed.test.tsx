@@ -9,7 +9,6 @@ import {
     silenceExpectedConsoleError,
 } from "./help";
 import { createControl, Reducer } from "../packages/core/control";
-import { same } from "../packages/tools/functions";
 
 silenceExpectedConsoleError();
 
@@ -43,6 +42,6 @@ const ctrl = createControl(reducer);
 
 ctrl.select((f) => f.foo)
     .select((f) => f.bar)
-    .execute((ctl) => {
+    .perform((ctl) => {
         ctl.snapshot();
     });
