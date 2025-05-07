@@ -39,9 +39,3 @@ const reducer: Reducer<{ foo: { bar: { baz: string } } }> = (
 };
 
 const ctrl = createControl(reducer);
-
-ctrl.select((f) => f.foo)
-    .select((f) => f.bar)
-    .perform((ctl) => {
-        ctl.snapshot();
-    });

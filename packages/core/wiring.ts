@@ -3,7 +3,7 @@ import type { Fn } from "../tools/functions";
 import { Obj, freeze, sortToString } from "../tools/objects";
 import { randomString } from "../tools/strings";
 import { primitive } from "../tools/ts";
-import { Reducer, Task, Msg, TaskControl, ControlOverlay, Control } from "./control";
+import { Reducer, Task, Msg, ControlOverlay, Control } from "./control";
 import { getInitialState } from "./reducers";
 
 function probeMsg(setterTask: (wireId: string) => Task<void, unknown, unknown>) {
@@ -69,7 +69,7 @@ export function makeWiringRoot<TState extends object, TMsg extends Msg, TCtx>(
         freeze(tasks);
     }
 
-    const stubTaskControl = new Proxy({} as Fn.Arg<TTask>, {
+    const stubTaskControl = new Proxy({} as Fn.Args<TTask>[0], {
         get: (_, prop: string) => {
             if (prop === ("snapshot" satisfies keyof Control.Any)) {
                 return () => stateGetter();
@@ -80,7 +80,7 @@ export function makeWiringRoot<TState extends object, TMsg extends Msg, TCtx>(
     });
 
     for (const task of tasks) {
-        task(stubTaskControl);
+        task(stubTaskControl );
     }
 
     let stateGetter = function lockedStateGetter(): TStateWithWires {
@@ -167,8 +167,8 @@ export function createWire<TState, TMsg extends Msg, TCtx = {}, TParams = void>(
     function selectWireHandle(params: TParams) {
         type THandle = {
             selectOwnState: (root: WiringRoot) => TState;
-            require: (ctl: TaskControl<unknown, unknown>) => void;
-            abandon: (ctl: TaskControl<unknown, unknown>) => void;
+            require: (ctl: Control.Any) => void;
+            abandon: (ctl: Control.Any) => void;
         };
 
         let reducer = reducerFactory(params);

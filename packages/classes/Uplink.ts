@@ -1,5 +1,5 @@
 import { sortToString } from "../tools/objects";
-import { Cmd, Task, TaskControl, Msg, MsgWith } from "../core/control";
+import { Cmd, Task, Msg, MsgWith, Control } from "../core/control";
 import { todo } from "../tools/errors";
 import { memoOne } from "../tools/functions";
 import { defineMsgGroup } from "../core/messages";
@@ -90,7 +90,7 @@ interface UplinkState<TVal, TIn> {
 
 function createUplinkImpl<TVal, TIn, TOut = TVal>(setup: UplinkSetup<TVal, TIn, TOut>) {
     type TUplinkState = UplinkState<TVal, TIn>;
-    type TTaskCtl = TaskControl<TUplinkState>;
+    type TTaskCtl = Control<TUplinkState>;
     type TUplink = Uplink<TVal>;
     const { name: uplinkName, fetch: fetchValue } = setup;
 

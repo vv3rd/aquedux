@@ -1,8 +1,6 @@
 import { freeze, Immutable } from "../tools/objects";
-import { safe, same, noop, Callback, GetterOf } from "../tools/functions";
+import { same, noop, GetterOf, Callback } from "../tools/functions";
 import { randomString } from "../tools/strings";
-import { panic } from "../tools/errors";
-import { Pretty } from "../tools/ts";
 
 export interface Msg<T extends Msg.Type = Msg.Type> {
     type: T;
@@ -28,7 +26,7 @@ export declare namespace Msg {
 }
 
 export interface Dispatch {
-    (this: Control.Any, message: Msg.Any): void;
+    (message: Msg.Any): void;
 }
 export declare namespace Dispatch {
     interface Haver {
@@ -84,30 +82,17 @@ export interface Cmd<TState, TCtx = {}> {
 }
 
 export interface Task<TResult, TState, TCtx = {}> {
-    (control: TaskControl<TState, TCtx>): TResult;
+    (control: Control<TState, TCtx>): TResult;
 }
-
-export interface TaskControl<TState, TCtx = {}> extends Control<TState, TCtx> {
-    signal: AbortSignal;
-}
-
-type ControlType<TState, TCtx> = Pretty<
-    {
-        [key in keyof { readonly "~TState": unique symbol }]?: TState;
-    } & {
-        [key in keyof { readonly "~TCtx": unique symbol }]?: TCtx;
-    }
->;
 
 interface ControlData<TState, TCtx> {
     snapshot: GetterOf<TState>;
     context: Immutable<TCtx>;
 }
 export interface Control<TState, TCtx = {}> extends ControlData<TState, TCtx> {
-    subscribe: (callback: Callback) => Subscription;
-    select: Select;
+    nextMessage: () => NextMessage;
+    lastMessage: () => Msg;
     dispatch: Dispatch;
-    execute: Execute;
     catch: (...errors: unknown[]) => void;
 }
 export declare namespace Control {
@@ -116,14 +101,16 @@ export declare namespace Control {
     type inferState<R> = R extends ControlData<infer TState, any> ? TState : never;
 }
 
+interface NextMessage<TMsg = Msg> {
+    then: (onReceive: (msg: TMsg) => void) => void;
+}
+
 interface Unsubscribe {
     (): void;
 }
 
 export interface Subscription {
     onUnsubscribe: (teardown: () => void) => void;
-    nextMessage: () => Promise<Msg>;
-    lastMessage: () => Msg;
     unsubscribe: Unsubscribe;
 }
 
@@ -170,21 +157,25 @@ const createControlImpl: createControlImpl = (final) => (reducer, context) => {
 
     let state: TState = Reducer.initialize(reducer);
 
-    type Listener = { notify: Callback; cleanups: Array<Callback>; count: number };
-    const listeners = new Map<Callback, Listener>();
+    let waiters: Array<(msg: TMsg) => void> = [];
     let lastMsg: TMsg;
-    let nextMsg: PromiseWithResolvers<TMsg> = Promise.withResolvers();
+    let nextMsg: NextMessage<TMsg> | undefined;
 
-    const activeControl: TSelf = {
+    const control: TSelf = {
         context,
-
-        select(selector) {
-            // TODO: add per-selector registries of listeners, continue thinking on how nextMessage should work
-            return { ...this, snapshot: () => selector(this.snapshot()) };
-        },
-
         snapshot() {
             return state;
+        },
+        lastMessage() {
+            return lastMsg;
+        },
+        nextMessage() {
+            return nextMsg ?? (nextMsg = { then: waiters.push.bind(waiters) });
+        },
+        catch(...errors) {
+            for (const error of errors) {
+                reportError(error);
+            }
         },
 
         dispatch(msg) {
@@ -193,123 +184,79 @@ const createControlImpl: createControlImpl = (final) => (reducer, context) => {
             }
             let tasks: Task<void, TState, TCtx>[] = [];
             try {
-                lockControl();
                 state = reducer(state, msg, (t) => tasks.push(t));
             } finally {
-                unlockControl();
                 freeze(tasks);
             }
+            const callbacks = waiters;
+            waiters = [];
+            nextMsg = undefined;
             lastMsg = msg;
-            nextMsg.resolve(msg);
-            nextMsg = Promise.withResolvers();
 
+            const self = final();
             const errs: unknown[] = [];
             /* biome-ignore format: */
-            for (const [_, l] of listeners) try { l.notify() } catch (e) { errs.push(e) }
+            for (const notify of callbacks) try { notify(msg) } catch (e) { errs.push(e) }
             /* biome-ignore format: */
-            for (const t of tasks) try { this.execute(t) } catch (e) { errs.push(e) }
+            for (const task of tasks) try { task(self) } catch (e) { errs.push(e) }
             if (errs.length) {
-                this.catch(...errs);
-            }
-        },
-
-        subscribe(callback) {
-            let listener = listeners.get(callback);
-            if (listener !== undefined) {
-                listener.count += 1;
-            } else {
-                listener = { notify: callback, cleanups: [], count: 0 };
-                listeners.set(callback, listener);
-            }
-
-            // FIXME: counting subscriptions might be not the same as counting selector observers
-            // i could attach same reference of listener callback to each selector via WeakMap
-            // but it doesn't seam like resilient solution
-            return {
-                onUnsubscribe: (teardown) => listener.cleanups.push(teardown),
-                lastMessage: () => lastMsg,
-                nextMessage: () => nextMsg.promise,
-                unsubscribe: () => {
-                    const listener = listeners.get(callback);
-                    if (!listener) {
-                        return;
-                    }
-                    if (--listener.count === 0) {
-                        listeners.delete(callback);
-                        listener.cleanups.forEach((fn) => fn());
-                    }
-                },
-            };
-        },
-
-        execute(task) {
-            const ac = new AbortController();
-            const doTask = safe(task, {
-                finally: () => ac.abort(new Error(TASK_EXITED_ERR)),
-            });
-            const result = doTask(createTaskControl(this, ac.signal));
-            return result;
-        },
-
-        catch(...errors) {
-            for (const error of errors) {
-                reportError(error);
+                self.catch(...errs);
             }
         },
     };
 
-    {
-        let delegate: TSelf = activeControl;
-        var lockControl = () => {
-            delegate = lockedControl;
-        };
-        var unlockControl = () => {
-            delegate = activeControl;
-        };
-
-        const lockedControl: TSelf = {
-            context,
-            dispatch: () => panic(CTRL_LOCKED_ERR),
-            execute: () => panic(CTRL_LOCKED_ERR),
-            catch: () => panic(CTRL_LOCKED_ERR),
-            snapshot: () => panic(CTRL_LOCKED_ERR),
-            subscribe: () => panic(CTRL_LOCKED_ERR),
-            select: () => panic(CTRL_LOCKED_ERR),
-        };
-
-        return {
-            context,
-            dispatch: (...a) => delegate.dispatch(...a),
-            execute: (...a) => delegate.execute(...a),
-            select: (...a) => delegate.select(...a),
-            catch: (...a) => delegate.catch(...a),
-            snapshot: () => delegate.snapshot(),
-            subscribe: (...a) => delegate.subscribe(...a),
-        };
-    }
+    return control;
 };
 
-export function createTaskControl<TState, TCtx>(
-    base: Control<TState, TCtx>,
-    signal: AbortSignal,
-): TaskControl<TState, TCtx> {
-    return {
-        ...base,
-        signal,
-        subscribe(listener: Callback): Subscription {
-            const sub = base.subscribe(listener);
-            signal.addEventListener("abort", sub.unsubscribe);
-            return {
-                ...sub,
-                nextMessage: () => {
-                    const resolved = sub.nextMessage();
-                    const disposed = new Promise<never>((_, reject) => sub.onUnsubscribe(reject));
-                    return Promise.race([resolved, disposed]);
-                },
+export function createControlObserver<TState, TCtx = {}>(control: Control<TState, TCtx>) {
+    const listeners = new Map<
+        Callback,
+        {
+            notify: Callback;
+            count: number;
+            cleanups: Callback[];
+        }
+    >();
+
+    let nextMsg: NextMessage | undefined;
+
+    const updateNextMsg = () => {
+        nextMsg = control.nextMessage();
+        nextMsg.then(notify);
+    };
+
+    const notify = () => {
+        for (const listener of listeners.values()) {
+            if (listener.count !== 0) {
+                listener.notify();
+            }
+        }
+        updateNextMsg();
+    };
+
+    const observer = {
+        subscribe(callback: Callback) {
+            if (nextMsg === undefined) {
+                updateNextMsg();
+            }
+            let listener = listeners.get(callback);
+            if (listener === undefined) {
+                listener = { notify: callback, count: 0, cleanups: [] };
+            } else {
+                listener.count++;
+            }
+            const unsubscribe = () => {
+                if (--listener.count !== 0) {
+                    return;
+                }
+                listeners.delete(callback);
+                listener.cleanups.forEach((fn) => {
+                    fn();
+                });
             };
+            unsubscribe.onUnsubscribe = listener.cleanups.push.bind(listener.cleanups);
+            return unsubscribe;
         },
     };
+    return observer;
 }
-
-const CTRL_LOCKED_ERR = "Control is locked on dispatch";
-const TASK_EXITED_ERR = "Task function completed, nextMessage rejects.";

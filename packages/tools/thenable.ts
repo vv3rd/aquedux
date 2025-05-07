@@ -1,17 +1,18 @@
 export class Next<T> implements PromiseLike<T> {
     #waiters: null | Array<(value: T) => unknown> = null;
 
-    then<TResult>(
-        this: Next<T>,
-        onDone: (value: T) => TResult | PromiseLike<TResult>,
+    then<TResult = T>(
+        onDone?: ((value: T) => TResult | PromiseLike<TResult>) | null | undefined,
     ): PromiseLike<TResult> {
         const next = new Next<TResult>();
         if (this.#waiters == null) {
             this.#waiters = [];
         }
         this.#waiters.push((value) => {
-            const result = onDone(value);
-            if (result && typeof result === "object" && "then" in result) {
+            const result = onDone?.(value);
+            if (result == null) {
+                next.push(value as unknown as TResult);
+            } else if (typeof result === "object" && "then" in result) {
                 result.then((value) => next.push(value));
             } else {
                 next.push(result);

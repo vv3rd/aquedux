@@ -8,7 +8,7 @@ export declare namespace Fn {
 
     type Any = (...args: any[]) => any;
 
-    type Arg<F extends Any> = F extends (argument: infer A) => any ? A : void;
+    type Arg<F extends (argument: any) => any> = F extends (argument: infer A) => any ? A : never;
     type Args<F extends Any> = F extends (...args: infer A) => any ? A : never;
 }
 

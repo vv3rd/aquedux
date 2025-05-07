@@ -1,5 +1,5 @@
 import { Fn, same } from "../tools/functions";
-import { Msg, MsgWith } from "./control";
+import { Dispatch, Msg, MsgWith } from "./control";
 
 function typedMsgFactory<T extends string, F extends MsgFactory<Msg<T>>>(type: T, factoryFn: F) {
     type TMsg = ReturnType<typeof factoryFn>;
@@ -66,26 +66,22 @@ export function defineMsgGroup<S extends string>(groupName: S) {
 
 type MsgFactoriesObj = { [key in string]: MsgFactory<Msg.Any, any[]> };
 
-interface BoundDispatch {
-    (msg: Msg.Any): void;
-}
-
 export function bindMsgFactories<T extends MsgFactoriesObj>(
     factories: T,
-): (dispatch: BoundDispatch) => BoundDispatch & T;
+): (dispatch: Dispatch) => Dispatch & T;
 export function bindMsgFactories(
-    dispatch: BoundDispatch,
-): <T extends MsgFactoriesObj>(factories: T) => BoundDispatch & T;
-export function bindMsgFactories(dispatchOrFactories: BoundDispatch | MsgFactoriesObj) {
+    dispatch: Dispatch,
+): <T extends MsgFactoriesObj>(factories: T) => Dispatch & T;
+export function bindMsgFactories(dispatchOrFactories: Dispatch | MsgFactoriesObj) {
     if (typeof dispatchOrFactories === "function") {
         const dispatch = dispatchOrFactories;
         return (factories: MsgFactoriesObj) => impl(dispatch, factories);
     } else {
         const factories = dispatchOrFactories;
-        return (dispatch: BoundDispatch) => impl(dispatch, factories);
+        return (dispatch: Dispatch) => impl(dispatch, factories);
     }
 
-    function impl(dispatch: BoundDispatch, factories: MsgFactoriesObj) {
+    function impl(dispatch: Dispatch, factories: MsgFactoriesObj) {
         const dispatchClone = dispatch.bind(null);
         return Object.assign(
             dispatchClone,
