@@ -1,5 +1,5 @@
 import { freeze, Immutable } from "../tools/objects";
-import { same, noop, GetterOf, Callback } from "../tools/functions";
+import { same, noop, GetterOf, Callback, Fn } from "../tools/functions";
 import { randomString } from "../tools/strings";
 
 export interface Msg<T extends Msg.Type = Msg.Type> {
@@ -31,24 +31,6 @@ export interface Dispatch {
 export declare namespace Dispatch {
     interface Haver {
         dispatch: Dispatch;
-    }
-}
-
-export interface Execute {
-    <T, TState, TCtx>(this: Control<TState, TCtx>, task: Task<T, TState, TCtx>): T;
-}
-export declare namespace Execute {
-    interface Haver {
-        execute: Execute;
-    }
-}
-
-export interface Select {
-    <T, TState, TCtx>(this: Control<TState, TCtx>, map: (state: TState) => T): Control<T, TCtx>;
-}
-export declare namespace Select {
-    interface Haver {
-        select: Select;
     }
 }
 
@@ -103,15 +85,6 @@ export declare namespace Control {
 
 interface NextMessage<TMsg = Msg> {
     then: (onReceive: (msg: TMsg) => void) => void;
-}
-
-interface Unsubscribe {
-    (): void;
-}
-
-export interface Subscription {
-    onUnsubscribe: (teardown: () => void) => void;
-    unsubscribe: Unsubscribe;
 }
 
 /* ========================
@@ -208,13 +181,30 @@ const createControlImpl: createControlImpl = (final) => (reducer, context) => {
     return control;
 };
 
+interface ControlObserver<TState, TCtx> {
+    snapshot(): TState;
+    dispatch(msg: Msg): void;
+    dispatch<TResult>(task: Task<TResult, TState, TCtx>): TResult;
+
+    select<TNext>(map: (state: TState) => TNext): ControlObserver<TNext, TCtx>;
+    subscribe(callback: Callback): Subscription;
+}
+
+interface Subscription {
+    isObserved(): boolean;
+    isSingular(): boolean;
+    unsubscribe(): void;
+}
+
+const OBSERVERS_REGISTRY = new WeakMap<Fn.Any | Control.Any, ControlObserver<any, any>>();
+
 export function createControlObserver<TState, TCtx = {}>(control: Control<TState, TCtx>) {
+
     const listeners = new Map<
         Callback,
         {
             notify: Callback;
             count: number;
-            cleanups: Callback[];
         }
     >();
 
@@ -234,29 +224,64 @@ export function createControlObserver<TState, TCtx = {}>(control: Control<TState
         updateNextMsg();
     };
 
-    const observer = {
-        subscribe(callback: Callback) {
+    const observer: ControlObserver<TState, TCtx> = {
+        snapshot() {
+            return control.snapshot();
+        },
+
+        select(selector) {
+            const existing = OBSERVERS_REGISTRY.get(selector);
+            if (existing) {
+                return existing;
+            }
+            const observer = createControlObserver({
+                ...control,
+                snapshot: () => selector(control.snapshot()),
+            });
+
+            OBSERVERS_REGISTRY.set(selector, observer);
+
+            return observer;
+        },
+
+        dispatch(taskOrMsg: Msg | Task<any, TState, TCtx>) {
+            if (typeof taskOrMsg === "function") {
+                const task = taskOrMsg;
+                return task(control);
+            } else {
+                const msg = taskOrMsg;
+                control.dispatch(msg);
+            }
+        },
+
+        subscribe(callback) {
             if (nextMsg === undefined) {
                 updateNextMsg();
             }
             let listener = listeners.get(callback);
             if (listener === undefined) {
-                listener = { notify: callback, count: 0, cleanups: [] };
+                listener = { notify: callback, count: 0 };
+                listeners.set(callback, listener);
             } else {
                 listener.count++;
             }
-            const unsubscribe = () => {
-                if (--listener.count !== 0) {
-                    return;
-                }
-                listeners.delete(callback);
-                listener.cleanups.forEach((fn) => {
-                    fn();
-                });
+            const subscription: Subscription = {
+                unsubscribe() {
+                    if (--listener.count !== 0) {
+                        return;
+                    }
+                    listeners.delete(callback);
+                },
+                isObserved() {
+                    return listener.count > 0;
+                },
+                isSingular() {
+                    return listener.count === 1;
+                },
             };
-            unsubscribe.onUnsubscribe = listener.cleanups.push.bind(listener.cleanups);
-            return unsubscribe;
+            return subscription;
         },
     };
+
     return observer;
 }

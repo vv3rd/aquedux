@@ -1,7 +1,7 @@
 import { Is } from "../tools/functions";
-import { Subscription, Msg } from "./control";
+import {  Msg } from "./control";
 
-export interface MsgStream<TState> extends Subscription, AsyncIterable<Msg> {
+export interface MsgStream<TState> extends AsyncIterable<Msg> {
     query(checker: (state: TState) => boolean): Promise<TState>;
     query<T>(selector: (state: TState) => T | null | undefined | false): Promise<T>;
     query<U extends TState>(predicate: (state: TState) => state is U): Promise<U>;

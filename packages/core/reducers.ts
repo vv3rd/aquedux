@@ -2,7 +2,6 @@ import { asEntries } from "../tools/objects";
 import { isPlainObject } from "../tools/objects";
 import { Fn } from "../tools/functions";
 import { Cmd, Reducer, MsgWith, Msg } from "./control";
-import { createScopedCmd } from "./scoping";
 import { defineMsg, TypedMsgFactory } from "./messages";
 
 export function getInitialState<TState>(reducer: Reducer<TState, any, any>): TState {
@@ -47,6 +46,15 @@ export const combineReducers: combineReducers = (reducersObject) => {
         }
         return next;
     };
+};
+
+type createScopedCmd = <TStateA, TStateB, TCtx>(
+    command: Cmd<TStateA, TCtx>,
+    selector: (state: TStateA) => TStateB,
+) => Cmd<TStateB, TCtx>;
+
+export const createScopedCmd: createScopedCmd = (cmd, selector) => (task) => {
+    cmd((ctl) => task({ ...ctl, snapshot: () => selector(ctl.snapshot()) }));
 };
 
 export function createClass<
