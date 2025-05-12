@@ -22,8 +22,16 @@ class DecoderError extends Error {
     }
 }
 
-interface Decoder<T> {
+interface DecoderFn<T> {
     (thing: unknown): Result<T, DecoderError>;
+}
+
+interface Decoder<T> extends DecoderFn<T> {
+    infer: T;
+}
+
+function defineDecoder<T>(decoder: DecoderFn<T>) {
+    return decoder as Decoder<T>;
 }
 
 export function object<O>(
@@ -31,7 +39,7 @@ export function object<O>(
         field: <T>(fieldName: string | number, decoder: Decoder<T>) => T;
     }) => O,
 ): Decoder<O> {
-    return (thing: unknown): Result<O, DecoderError> => {
+    return defineDecoder((thing: unknown): Result<O, DecoderError> => {
         if (!thing || typeof thing !== "object") {
             return new Er(new DecoderError("is not object"));
         }
@@ -58,11 +66,11 @@ export function object<O>(
                 return new Er(new DecoderError("threw", { cause: er }));
             }
         }
-    };
+    });
 }
 
 export function array<T>(decoder: Decoder<T>): Decoder<T[]> {
-    return (thing: unknown): Result<T[], DecoderError> => {
+    return defineDecoder((thing: unknown): Result<T[], DecoderError> => {
         if (!Array.isArray(thing)) {
             return new Er(new DecoderError("is not array"));
         }
@@ -80,7 +88,7 @@ export function array<T>(decoder: Decoder<T>): Decoder<T[]> {
             }
         }
         return new Ok(output);
-    };
+    });
 }
 
 type BaseTypeName =
@@ -105,13 +113,13 @@ type BaseTypeMap = {
 };
 
 export function ofType<N extends BaseTypeName>(primitiveName: N): Decoder<BaseTypeMap[N]> {
-    return (thing: unknown) => {
+    return defineDecoder((thing: unknown) => {
         if (typeof thing === primitiveName) {
             return new Ok(thing as BaseTypeMap[N]);
         } else {
             return new Er(new DecoderError(`is not ${primitiveName}`));
         }
-    };
+    });
 }
 
 export const number = ofType("number");
@@ -125,7 +133,7 @@ export function decodes<T>(decoder: Decoder<T>) {
 }
 
 export function keyOf<T extends Record<keyof any, any>>(object: T): Decoder<keyof T> {
-    return (thing: unknown): Result<keyof T, DecoderError> => {
+    return defineDecoder((thing: unknown): Result<keyof T, DecoderError> => {
         if (
             (typeof thing === "string" || typeof thing === "number" || typeof thing === "symbol") &&
             thing in object
@@ -134,7 +142,7 @@ export function keyOf<T extends Record<keyof any, any>>(object: T): Decoder<keyo
         } else {
             return new Er(new DecoderError("not a key"));
         }
-    };
+    });
 }
 
 export const isKeyOf = <T extends object>(object: T, maybeKey: PropertyKey): maybeKey is keyof T =>
