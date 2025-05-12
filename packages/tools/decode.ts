@@ -1,21 +1,3 @@
-type Result<T, E> = Ok<T> | Er<E>;
-
-class Ok<T> {
-    ok: T;
-    er = null;
-    constructor(value: T) {
-        this.ok = value;
-    }
-}
-
-class Er<E> {
-    ok = null;
-    er: E;
-    constructor(error: E) {
-        this.er = error;
-    }
-}
-
 class DecoderError extends Error {
     constructor(message: string, options?: ErrorOptions) {
         super(message, options);
@@ -23,7 +5,7 @@ class DecoderError extends Error {
 }
 
 interface DecoderFn<T> {
-    (thing: unknown): Result<T, DecoderError>;
+    (thing: unknown): T | DecoderError;
 }
 
 interface Decoder<T> extends DecoderFn<T> {
@@ -39,9 +21,9 @@ export function object<O>(
         field: <T>(fieldName: string | number, decoder: Decoder<T>) => T;
     }) => O,
 ): Decoder<O> {
-    return defineDecoder((thing: unknown): Result<O, DecoderError> => {
+    return defineDecoder<O>((thing: unknown) => {
         if (!thing || typeof thing !== "object") {
-            return new Er(new DecoderError("is not object"));
+            return new DecoderError("is not object");
         }
         try {
             const value = innerDecoder({
@@ -50,44 +32,42 @@ export function object<O>(
                         throw new DecoderError(`is missing "${fieldName}"`);
                     }
                     const result = decoder(thing[fieldName]);
-                    if (result.er !== null) {
-                        throw new DecoderError(
-                            `has wrong "${fieldName}", it \n${result.er.message}`,
-                        );
+                    if (result instanceof DecoderError) {
+                        throw new DecoderError(`has wrong "${fieldName}", it \n${result.message}`);
                     }
-                    return result.ok;
+                    return result;
                 },
             });
-            return new Ok(value);
+            return value;
         } catch (er) {
             if (er instanceof DecoderError) {
-                return new Er(er);
+                return er;
             } else {
-                return new Er(new DecoderError("threw", { cause: er }));
+                return new DecoderError("threw", { cause: er });
             }
         }
     });
 }
 
 export function array<T>(decoder: Decoder<T>): Decoder<T[]> {
-    return defineDecoder((thing: unknown): Result<T[], DecoderError> => {
+    return defineDecoder<T[]>((thing: unknown) => {
         if (!Array.isArray(thing)) {
-            return new Er(new DecoderError("is not array"));
+            return new DecoderError("is not array");
         }
         const output: T[] = [];
         for (let i = 0; i < thing.length; i++) {
             if (!(i in thing)) {
-                return new Er(new DecoderError(`has empty slot at ${i}`));
+                return new DecoderError(`has empty slot at ${i}`);
             }
             const item = thing[i];
             const result = decoder(item);
-            if (result.er !== null) {
-                return new Er(new DecoderError(`has wrong "${i}", it \n${result.er.message}`));
+            if (result instanceof DecoderError) {
+                return new DecoderError(`has wrong "${i}", it \n${result.message}`);
             } else {
-                output.push(result.ok);
+                output.push(result);
             }
         }
-        return new Ok(output);
+        return output;
     });
 }
 
@@ -115,9 +95,9 @@ type BaseTypeMap = {
 export function ofType<N extends BaseTypeName>(primitiveName: N): Decoder<BaseTypeMap[N]> {
     return defineDecoder((thing: unknown) => {
         if (typeof thing === primitiveName) {
-            return new Ok(thing as BaseTypeMap[N]);
+            return thing as BaseTypeMap[N];
         } else {
-            return new Er(new DecoderError(`is not ${primitiveName}`));
+            return new DecoderError(`is not ${primitiveName}`);
         }
     });
 }
@@ -128,19 +108,19 @@ export const boolean = ofType("boolean");
 
 export function decodes<T>(decoder: Decoder<T>) {
     return (thing: unknown): thing is T => {
-        return decoder(thing).er === null;
+        return !(decoder(thing) instanceof DecoderError);
     };
 }
 
 export function keyOf<T extends Record<keyof any, any>>(object: T): Decoder<keyof T> {
-    return defineDecoder((thing: unknown): Result<keyof T, DecoderError> => {
+    return defineDecoder<keyof T>((thing: unknown) => {
         if (
             (typeof thing === "string" || typeof thing === "number" || typeof thing === "symbol") &&
             thing in object
         ) {
-            return new Ok(thing as keyof T);
+            return thing as keyof T;
         } else {
-            return new Er(new DecoderError("not a key"));
+            return new DecoderError("not a key");
         }
     });
 }
