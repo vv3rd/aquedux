@@ -4,7 +4,7 @@ import { Fn } from "../tools/functions";
 import { Cmd, Reducer, MsgWith, Msg } from "./control";
 import { defineMsg, TypedMsgFactory } from "./messages";
 
-export function getInitialState<TState>(reducer: Reducer<TState, any, any>): TState {
+export function getInitialState<TVal>(reducer: Reducer<TVal, any, any>): TVal {
     return Reducer.initialize(reducer);
 }
 
@@ -48,10 +48,10 @@ export const combineReducers: combineReducers = (reducersObject) => {
     };
 };
 
-type createScopedCmd = <TStateA, TStateB, TCtx>(
-    command: Cmd<TStateA, TCtx>,
-    selector: (state: TStateA) => TStateB,
-) => Cmd<TStateB, TCtx>;
+type createScopedCmd = <TValA, TValB, TCtx>(
+    command: Cmd<TValA, TCtx>,
+    selector: (state: TValA) => TValB,
+) => Cmd<TValB, TCtx>;
 
 export const createScopedCmd: createScopedCmd = (cmd, selector) => (task) => {
     cmd((ctl) => task({ ...ctl, snapshot: () => selector(ctl.snapshot()) }));

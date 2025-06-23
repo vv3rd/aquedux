@@ -28,24 +28,19 @@ export declare namespace Msg {
 export interface Dispatch {
     (message: Msg.Any): void;
 }
-export declare namespace Dispatch {
-    interface Haver {
-        dispatch: Dispatch;
-    }
+
+export interface Reducer<TVal, TMsg extends Msg = Msg, TCtx = {}> {
+    (val: TVal | undefined, msg: TMsg, cmd: Cmd<TVal, TCtx>): TVal;
+    getInitialState?: () => TVal;
 }
 
-export interface Reducer<TState, TMsg extends Msg = Msg, TCtx = {}> {
-    (state: TState | undefined, msg: TMsg, cmd: Cmd<TState, TCtx>): TState;
-    getInitialState?: () => TState;
-}
-
-export function Reducer<TState, TMsg extends Msg.Any = Msg.Any, TCtx = {}>(
-    reducer: Reducer<TState, TMsg, TCtx>,
+export function Reducer<TVal, TMsg extends Msg.Any = Msg.Any, TCtx = {}>(
+    reducer: Reducer<TVal, TMsg, TCtx>,
 ) {
     return reducer;
 }
 
-Reducer.initialize = function initialize<TState>(reducer: Reducer<TState, any, any>): TState {
+Reducer.initialize = function initialize<TVal>(reducer: Reducer<TVal, any, any>): TVal {
     if (reducer.getInitialState) {
         return reducer.getInitialState();
     }
@@ -59,19 +54,19 @@ export declare namespace Reducer {
     type inferState<R> = R extends Reducer<infer S, any, any> ? S : never;
 }
 
-export interface Cmd<TState, TCtx = {}> {
-    (task: Task<void, TState, TCtx>): void;
+export interface Cmd<TVal, TCtx = {}> {
+    (task: Task<void, TVal, TCtx>): void;
 }
 
-export interface Task<TResult, TState, TCtx = {}> {
-    (control: Control<TState, TCtx>): TResult;
+export interface Task<TResult, TVal, TCtx = {}> {
+    (control: Control<TVal, TCtx>): TResult;
 }
 
-interface ControlData<TState, TCtx> {
-    snapshot: GetterOf<TState>;
+interface ControlData<TVal, TCtx> {
+    snapshot: GetterOf<TVal>;
     context: Immutable<TCtx>;
 }
-export interface Control<TState, TCtx = {}> extends ControlData<TState, TCtx> {
+export interface Control<TVal, TCtx = {}> extends ControlData<TVal, TCtx> {
     nextMessage: () => NextMessage;
     lastMessage: () => Msg;
     dispatch: Dispatch;
@@ -80,7 +75,7 @@ export interface Control<TState, TCtx = {}> extends ControlData<TState, TCtx> {
 export declare namespace Control {
     type Any = Control<any, any>;
     type inferCtx<R> = R extends ControlData<any, infer TCtx> ? TCtx : never;
-    type inferState<R> = R extends ControlData<infer TState, any> ? TState : never;
+    type inferState<R> = R extends ControlData<infer TVal, any> ? TVal : never;
 }
 
 interface NextMessage<TMsg = Msg> {
@@ -91,44 +86,45 @@ interface NextMessage<TMsg = Msg> {
     creating
    ======================== */
 
-type ControlOverlay<TState, TCtx> = (
-    creator: ControlCreator<TState, TCtx>,
-    final: () => Control<TState, TCtx>,
-) => ControlCreator<TState, TCtx>;
+type ControlOverlay<TVal, TCtx> = (
+    creator: ControlCreator<TVal, TCtx>,
+    final: () => Control<TVal, TCtx>,
+) => ControlCreator<TVal, TCtx>;
 
-export function ControlOverlay<TState, TCtx = {}>(overlay: ControlOverlay<TState, TCtx>) {
+export function ControlOverlay<TVal, TCtx = {}>(overlay: ControlOverlay<TVal, TCtx>) {
     return overlay;
 }
 
-type ControlCreator<TState, TCtx> = (
-    reducer: Reducer<TState, Msg.Any, TCtx>,
+type ControlCreator<TVal, TCtx> = (
+    reducer: Reducer<TVal, Msg.Any, TCtx>,
     context: TCtx,
-) => Control<TState, TCtx>;
+) => Control<TVal, TCtx>;
 
-export function createControl<TState, TCtx = {}>(
-    reducer: Reducer<TState, Msg.Any, TCtx>,
+export function createControl<TVal, TCtx = {}>(
+    reducer: Reducer<TVal, Msg.Any, TCtx>,
     {
         context = {} as TCtx,
         overlay = same,
     }: {
         context?: TCtx;
-        overlay?: ControlOverlay<TState, TCtx>;
+        overlay?: ControlOverlay<TVal, TCtx>;
     } = {},
 ) {
     const get = () => it;
     const create = overlay(createControlImpl(get), get);
-    const it: Control<TState, TCtx> = create(reducer, context);
+    const it: Control<TVal, TCtx> = create(reducer, context);
     return it;
 }
 
 type createControlImpl = (final: () => Control.Any) => ControlCreator<any, any>;
 const createControlImpl: createControlImpl = (final) => (reducer, context) => {
-    type TState = Reducer.inferState<typeof reducer>;
+    type TVal = Reducer.inferState<typeof reducer>;
     type TMsg = Msg;
     type TCtx = typeof context;
-    type TSelf = Control<TState, TCtx>;
+    type TSelf = Control<TVal, TCtx>;
+    type TTask = Task<void, TVal, TCtx>;
 
-    let state: TState = Reducer.initialize(reducer);
+    let state: TVal = Reducer.initialize(reducer);
 
     let waiters: Array<(msg: TMsg) => void> = [];
     let lastMsg: TMsg;
@@ -155,7 +151,7 @@ const createControlImpl: createControlImpl = (final) => (reducer, context) => {
             if (msg == null) {
                 return;
             }
-            let tasks: Task<void, TState, TCtx>[] = [];
+            let tasks: TTask[] = [];
             try {
                 state = reducer(state, msg, (t) => tasks.push(t));
             } finally {
@@ -181,12 +177,12 @@ const createControlImpl: createControlImpl = (final) => (reducer, context) => {
     return control;
 };
 
-interface ControlObserver<TState, TCtx> {
-    snapshot(): TState;
+interface ControlObserver<TVal, TCtx> {
+    snapshot(): TVal;
     dispatch(msg: Msg): void;
-    dispatch<TResult>(task: Task<TResult, TState, TCtx>): TResult;
+    dispatch<TResult>(task: Task<TResult, TVal, TCtx>): TResult;
 
-    select<TNext>(map: (state: TState) => TNext): ControlObserver<TNext, TCtx>;
+    select<TNext>(map: (state: TVal) => TNext): ControlObserver<TNext, TCtx>;
     subscribe(callback: Callback): Subscription;
 }
 
@@ -198,8 +194,7 @@ interface Subscription {
 
 const OBSERVERS_REGISTRY = new WeakMap<Fn.Any | Control.Any, ControlObserver<any, any>>();
 
-export function createControlObserver<TState, TCtx = {}>(control: Control<TState, TCtx>) {
-
+export function createControlObserver<TVal, TCtx = {}>(control: Control<TVal, TCtx>) {
     const listeners = new Map<
         Callback,
         {
@@ -224,7 +219,7 @@ export function createControlObserver<TState, TCtx = {}>(control: Control<TState
         updateNextMsg();
     };
 
-    const observer: ControlObserver<TState, TCtx> = {
+    const observer: ControlObserver<TVal, TCtx> = {
         snapshot() {
             return control.snapshot();
         },
@@ -244,7 +239,7 @@ export function createControlObserver<TState, TCtx = {}>(control: Control<TState
             return observer;
         },
 
-        dispatch(taskOrMsg: Msg | Task<any, TState, TCtx>) {
+        dispatch(taskOrMsg: Msg | Task<any, TVal, TCtx>) {
             if (typeof taskOrMsg === "function") {
                 const task = taskOrMsg;
                 return task(control);

@@ -24,15 +24,15 @@ export interface WiringRoot {
     };
 }
 
-export interface Wire<TState> {
-    selectOwnState: (root: WiringRoot) => TState;
+export interface Wire<TVal> {
+    selectOwnState: (root: WiringRoot) => TVal;
 }
 
-export interface WiredReducer<TState> extends Reducer<TState>, Wire<TState> {}
+export interface WiredReducer<TVal> extends Reducer<TVal>, Wire<TVal> {}
 
-export function withWiring<TState>(reducer: Reducer<TState>): WiredReducer<TState> {
+export function withWiring<TVal>(reducer: Reducer<TVal>): WiredReducer<TVal> {
     const wireId = Math.random().toString(36).substring(2);
-    const wiredReducer: WiredReducer<TState> = (state, msg, out) => {
+    const wiredReducer: WiredReducer<TVal> = (state, msg, out) => {
         if (probeMsg.match(msg)) {
             out(msg.wiringSetter(wireId));
         }
@@ -44,20 +44,20 @@ export function withWiring<TState>(reducer: Reducer<TState>): WiredReducer<TStat
         if (output === undefined) {
             throw new Error(FUCK_NOT_WIRED);
         } else {
-            return output as TState;
+            return output as TVal;
         }
     };
 
     return wiredReducer;
 }
 
-export function makeWiringRoot<TState extends object, TMsg extends Msg, TCtx>(
-    reducer: Reducer<TState, TMsg, TCtx>,
+export function makeWiringRoot<TVal extends object, TMsg extends Msg, TCtx>(
+    reducer: Reducer<TVal, TMsg, TCtx>,
 ) {
-    type TStateWithWires = WiringRoot & TState;
-    type TTask = Task<void, TStateWithWires, TCtx>;
+    type TValWithWires = WiringRoot & TVal;
+    type TTask = Task<void, TValWithWires, TCtx>;
 
-    const wireMeta: Record<string, (state: TStateWithWires) => unknown> = {};
+    const wireMeta: Record<string, (state: TValWithWires) => unknown> = {};
     const probe = probeMsg((wireId) => (api) => {
         wireMeta[wireId] = makeWireSelector(api.snapshot);
     });
@@ -83,12 +83,12 @@ export function makeWiringRoot<TState extends object, TMsg extends Msg, TCtx>(
         task(stubTaskControl );
     }
 
-    let stateGetter = function lockedStateGetter(): TStateWithWires {
+    let stateGetter = function lockedStateGetter(): TValWithWires {
         throw new Error(FUCK_PROBE_MISUSED);
     };
 
     function makeWireSelector(getState: () => unknown) {
-        return (rootState: TStateWithWires) => {
+        return (rootState: TValWithWires) => {
             const previous = stateGetter;
             stateGetter = () => rootState;
             try {
@@ -99,7 +99,7 @@ export function makeWiringRoot<TState extends object, TMsg extends Msg, TCtx>(
         };
     }
 
-    const wiringRootReducer: Reducer<TStateWithWires, TMsg, TCtx> = (state, msg, push) => {
+    const wiringRootReducer: Reducer<TValWithWires, TMsg, TCtx> = (state, msg, push) => {
         state = reducer(state, msg, push);
         if (!(wiringKey in state)) {
             state = { ...state, [wiringKey]: wireMeta };
@@ -112,8 +112,8 @@ export function makeWiringRoot<TState extends object, TMsg extends Msg, TCtx>(
 
 function createWireRegistry() {
     return {
-        createWire: <TState, TMsg extends Msg, TCtx = {}>(
-            reducer: Reducer<TState, TMsg, TCtx>,
+        createWire: <TVal, TMsg extends Msg, TCtx = {}>(
+            reducer: Reducer<TVal, TMsg, TCtx>,
         ) => {},
     };
 }
@@ -143,13 +143,13 @@ function createMutableRef<T extends primitive>(value: T) {
     });
 }
 
-export function createWire<TState, TMsg extends Msg, TCtx = {}, TParams = void>(
+export function createWire<TVal, TMsg extends Msg, TCtx = {}, TParams = void>(
     this: {
         registry: Map<string, Reducer.Any>;
         selectContainer: (upperState: WiringRoot) => WiresContainer;
     },
     name: string,
-    reducerFactory: (params: TParams) => Reducer<TState, TMsg, TCtx>,
+    reducerFactory: (params: TParams) => Reducer<TVal, TMsg, TCtx>,
 ) {
     const { registry, selectContainer } = this;
     registry.set(name, reducerFactory);
@@ -166,7 +166,7 @@ export function createWire<TState, TMsg extends Msg, TCtx = {}, TParams = void>(
 
     function selectWireHandle(params: TParams) {
         type THandle = {
-            selectOwnState: (root: WiringRoot) => TState;
+            selectOwnState: (root: WiringRoot) => TVal;
             require: (ctl: Control.Any) => void;
             abandon: (ctl: Control.Any) => void;
         };
@@ -181,7 +181,7 @@ export function createWire<TState, TMsg extends Msg, TCtx = {}, TParams = void>(
             if (key in container && handle) {
                 return handle;
             }
-            let initialValue: TState;
+            let initialValue: TVal;
             let outletsCount = 0;
             return (handle = {
                 selectOwnState(root) {

@@ -60,9 +60,9 @@ export function useDispatch<T extends { [key: string]: MsgFactory<Msg.Any, any[]
 
 export function useTracedSelector<
     TArgs extends any[],
-    TState extends object = {},
+    TVal extends object = {},
     TSelected = unknown,
->(selector: (state: TState, ...args: TArgs) => TSelected, ...args: TArgs): TSelected {
+>(selector: (state: TVal, ...args: TArgs) => TSelected, ...args: TArgs): TSelected {
     const { current: before } = useRef({ selector });
     if (before.selector !== selector) {
         before.selector = selector;
@@ -84,19 +84,19 @@ function debugTracedSelector(m: ReturnType<typeof craeteTracedSelector<any, any>
     return cache && [cache.value, Object.keys(cache.keys)];
 }
 
-function craeteTracedSelector<TArgs extends any[], TState extends object = {}, TSelected = unknown>(
-    selector: (state: TState, ...args: TArgs) => TSelected,
+function craeteTracedSelector<TArgs extends any[], TVal extends object = {}, TSelected = unknown>(
+    selector: (state: TVal, ...args: TArgs) => TSelected,
     args: TArgs,
 ) {
-    type TKeys = Record<string, keyof TState>;
+    type TKeys = Record<string, keyof TVal>;
 
     let cache: null | {
         value: TSelected;
-        state: TState;
+        state: TVal;
         keys: TKeys;
     } = null;
 
-    const tracedSelctor = (state: TState) => {
+    const tracedSelctor = (state: TVal) => {
         whenHasCache: if (cache) {
             for (const key of Object.values(cache.keys)) {
                 if (state[key] !== cache.state[key]) {
@@ -109,7 +109,7 @@ function craeteTracedSelector<TArgs extends any[], TState extends object = {}, T
         const keys: TKeys = {};
         const tracedState = new Proxy(state, {
             get(target, prop: string) {
-                const key = (keys[prop] = prop as keyof TState);
+                const key = (keys[prop] = prop as keyof TVal);
                 const val = target[key];
                 return val;
             },
