@@ -29,13 +29,13 @@ export interface Dispatch {
     (message: Msg.Any): void;
 }
 
-export interface Reducer<TVal, TMsg extends Msg = Msg, TCtx = {}> {
+export interface Reducer<TVal, TCtx = {}, TMsg extends Msg = Msg> {
     (val: TVal | undefined, msg: TMsg, cmd: Cmd<TVal, TCtx>): TVal;
     getInitialState?: () => TVal;
 }
 
-export function Reducer<TVal, TMsg extends Msg.Any = Msg.Any, TCtx = {}>(
-    reducer: Reducer<TVal, TMsg, TCtx>,
+export function Reducer<TVal, TCtx = {}, TMsg extends Msg.Any = Msg.Any>(
+    reducer: Reducer<TVal,TCtx, TMsg >,
 ) {
     return reducer;
 }
@@ -96,12 +96,12 @@ export function ControlOverlay<TVal, TCtx = {}>(overlay: ControlOverlay<TVal, TC
 }
 
 type ControlCreator<TVal, TCtx> = (
-    reducer: Reducer<TVal, Msg.Any, TCtx>,
+    reducer: Reducer<TVal, TCtx, Msg.Any>,
     context: TCtx,
 ) => Control<TVal, TCtx>;
 
 export function createControl<TVal, TCtx = {}>(
-    reducer: Reducer<TVal, Msg.Any, TCtx>,
+    reducer: Reducer<TVal, TCtx, Msg.Any>,
     {
         context = {} as TCtx,
         overlay = same,

@@ -1,4 +1,5 @@
-import { Cmd, Msg, Reducer } from "./control";
+import { freeze } from "../tools/objects";
+import { Cmd, Msg, Reducer, Task } from "./control";
 
 interface Wire<A> {
     address: string[];
@@ -73,3 +74,54 @@ function isWireSource<A>(wire: Wire<A>): wire is WireSource<A, unknown> {
     );
 }
 
+interface NextMessage<TMsg = Msg> {
+    then: (onReceive: (msg: TMsg) => void) => void;
+}
+
+function createCell<TVal, TCtx>(reducer: Reducer<TVal, TCtx>) {
+    type TTask = Task<void, TVal, TCtx>;
+
+    let state: TVal = Reducer.initialize(reducer);
+
+    let nextMsg: NextMessage<Msg> | undefined;
+    let waiters: Array<(msg: Msg) => void> = [];
+
+    let pending: Msg[] = [];
+    let tasks: TTask[] = [];
+    const cmd = (t: TTask) => tasks.push(t);
+
+    const control = {
+        snapshot() {
+            for (const msg of pending) {
+                state = reducer(state, msg, cmd);
+            }
+
+            return state;
+        },
+
+        flush() {
+          for (const t of tasks) {
+          }
+        },
+
+        lastMessage() {
+            return pending[pending.length - 1];
+        },
+        nextMessage() {
+            return nextMsg ?? (nextMsg = { then: waiters.push.bind(waiters) });
+        },
+
+        catch(...errors: unknown[]) {
+            for (const error of errors) {
+                reportError(error);
+            }
+        },
+
+        dispatch(msg: Msg) {
+            if (msg == null) {
+                return;
+            }
+            pending.push(msg);
+        },
+    };
+}
