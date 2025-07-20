@@ -1,19 +1,39 @@
-import { freeze } from "../tools/objects";
-import { Cmd, Msg, Reducer, Task } from "./control";
+import { noop, safe } from "../tools/functions";
+import { randomString } from "../tools/strings";
 
-interface Wire<A> {
-    address: string[];
-    read: (selector: Select) => A;
+export interface Fold<TVal, TCtx = {}, TMsg extends Mesg = Mesg> {
+    (val: TVal | undefined, msg: TMsg, cmd: Cmnd<TCtx>): TVal;
 }
 
-interface WireSource<A, C> extends Wire<A> {
-    init: () => A;
-    fold: (val: A, msg: Msg, cmd: Cmd<A, C>) => A;
+export interface Cmnd<TCtx = {}> {
+    (task: Task<TCtx>): void;
+}
+
+export interface Mesg<T extends string = string> {
+    type: T;
+}
+
+interface Task<TCtx = {}, TResult = void> {
+    (duct: Duct<TCtx>): TResult;
+}
+
+interface Duct<TCtx> {
+    context: TCtx;
+    read: <T>(wire: Wire<T>) => T;
+    send: (msg: Mesg) => void;
+    next: () => Promise<Mesg>;
+    catch: (...errors: unknown[]) => void;
+}
+
+interface Wire<TVal, TCtx = {}> {
+    path: string[];
+    make: (read: Read) => TVal;
+    fold: Fold<TVal, TCtx>;
 }
 
 type AnyWire = Wire<any>;
 
-interface Select {
+interface Read {
     <A>(wire: Wire<A>): A;
 }
 
@@ -37,15 +57,15 @@ function createStore() {
         if (box) {
             return box.val;
         }
-        if (isWireSource(wire)) {
-            const val = wire.init();
+        if (wire.fold) {
+            const val = wire.fold(undefined, { type: randomString() });
             mountWire(wire, val);
             return val;
         }
 
         selectCtx = { subject: wire, sources: new Set(), parent: selectCtx };
         try {
-            const val = wire.read(select);
+            const val = wire.make(select);
             mountWire(wire, val, selectCtx.sources);
             return val;
         } finally {
@@ -65,63 +85,48 @@ function createStore() {
     function observe() {}
 }
 
-function isWireSource<A>(wire: Wire<A>): wire is WireSource<A, unknown> {
-    return (
-        "init" in wire &&
-        wire.init instanceof Function &&
-        "fold" in wire &&
-        wire.fold instanceof Function
-    );
-}
+function createBox<TVal, TCtx>(wire: Wire<TVal, TCtx>, store: Duct<TCtx>) {
+    type TTask = Task<TCtx>;
 
-interface NextMessage<TMsg = Msg> {
-    then: (onReceive: (msg: TMsg) => void) => void;
-}
+    let dispatchedMessages: Mesg[] = [];
+    let scheduledTasks: TTask[] = [];
 
-function createCell<TVal, TCtx>(reducer: Reducer<TVal, TCtx>) {
-    type TTask = Task<void, TVal, TCtx>;
+    let state = wire.fold(undefined, { type: randomString() }, cmd);
 
-    let state: TVal = Reducer.initialize(reducer);
+    // const nextMessage = {
+    //     then(onFulfilled: (msg: Mesg) => void, onRejected: (error: unknown) => void) {
+    //         nextMessageWaiters.push({
+    //             fulfill: safe(onFulfilled, { catch: store.catch }),
+    //             reject: safe(onRejected, { catch: store.catch }),
+    //         });
+    //     },
+    // };
+    // const nextMessageWaiters: Array<{
+    //     fulfill: (msg: Mesg) => void;
+    //     reject: (error: unknown) => void;
+    // }> = [];
 
-    let nextMsg: NextMessage<Msg> | undefined;
-    let waiters: Array<(msg: Msg) => void> = [];
+    function cmd(task: TTask) {
+        scheduledTasks.push(task);
+    }
 
-    let pending: Msg[] = [];
-    let tasks: TTask[] = [];
-    const cmd = (t: TTask) => tasks.push(t);
+    function snapshot() {
+        state = dispatchedMessages.splice(0).reduce((next, msg) => {
+            return wire.fold(next, msg, cmd);
+        }, state);
 
-    const control = {
-        snapshot() {
-            for (const msg of pending) {
-                state = reducer(state, msg, cmd);
+        scheduledTasks.splice(0).forEach((task) => {
+            try {
+                task(store);
+            } catch (error) {
+                store.catch(error);
             }
+        });
 
-            return state;
-        },
+        return state;
+    }
 
-        flush() {
-          for (const t of tasks) {
-          }
-        },
-
-        lastMessage() {
-            return pending[pending.length - 1];
-        },
-        nextMessage() {
-            return nextMsg ?? (nextMsg = { then: waiters.push.bind(waiters) });
-        },
-
-        catch(...errors: unknown[]) {
-            for (const error of errors) {
-                reportError(error);
-            }
-        },
-
-        dispatch(msg: Msg) {
-            if (msg == null) {
-                return;
-            }
-            pending.push(msg);
-        },
-    };
+    function dispatch(msg: Mesg) {
+        dispatchedMessages.push(msg);
+    }
 }
